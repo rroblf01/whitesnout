@@ -285,12 +285,12 @@ Results measured with `benchmarks/benchmark.py` — 500 requests (10 concurrent)
 
 > **Platform**: Linux x86_64 · **Python**: 3.14.3 · **uvicorn**: 0.47.0
 
-### v2.0.0 — Sync threshold + Unified Rust header builder
+### v2.0.0 — Single Rust handler + Content type cache
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
 |---|---|---|---|---|
-| **whitesnout** | 824 | 6.0 | 89.7 | 31.5 |
-| whitenoise | 827 | 5.8 | 89.8 | 28.5 |
+| **whitesnout** | 854 | 6.0 | 84.8 | 31.6 |
+| whitenoise | 844 | 5.9 | 84.8 | 28.5 |
 
 > **Platform**: Linux x86_64 · **Python**: 3.14.5 · **uvicorn**: 0.47.0
 

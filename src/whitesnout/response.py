@@ -20,6 +20,9 @@ try:
         build_content_range as _rs_build_content_range,
     )
     from whitesnout._rs import (
+        build_full_response as _rs_build_full_response,
+    )
+    from whitesnout._rs import (
         build_headers as _rs_build_headers,
     )
     from whitesnout._rs import (
@@ -61,8 +64,9 @@ async def iter_chunks(
 ) -> AsyncGenerator[bytes, None]:
     remaining = None if end is None else (end - start + 1)
     total_size = remaining if remaining is not None else file_size
-    # Fast path: read small files in one shot via thread (avoids aiofiles per-chunk overhead)
+    # Fast path: read small files in one shot via thread (avoids aiofiles overhead)
     if total_size is not None and total_size <= sync_threshold:
+
         def _read() -> bytes:
             with open(path, "rb") as f:
                 if start:
@@ -70,6 +74,7 @@ async def iter_chunks(
                 if remaining is not None:
                     return f.read(remaining)
                 return f.read()
+
         yield await asyncio.to_thread(_read)
         return
 
@@ -287,6 +292,149 @@ def build_all_headers(
             headers.append((b"content-range", cr))
             range_spec = (rstart, rend)
     return (headers, status, final_length, range_spec)
+
+
+_content_type_cache: dict[str, str] = {}
+
+
+def build_full_response(
+    file_size: int,
+    mtime_ns: int,
+    filename: str,
+    charset: str = "utf-8",
+    cache_max_age: int = 3600,
+    immutable_max_age: int = 31536000,
+    immutable_pattern: str = "",
+    content_encoding: str | None = None,
+    security_enabled: bool = True,
+    cors_enabled: bool = False,
+    range_header: str | None = None,
+    method: str = "GET",
+    if_none_match: str | None = None,
+    if_modified_since: str | None = None,
+    file_path_str: str = "",
+) -> tuple[list[tuple[bytes, bytes]], int, int, tuple[int, int] | None, bool]:
+    if _RUST_AVAILABLE:
+        raw = _rs_build_full_response(
+            file_size,
+            mtime_ns,
+            filename,
+            charset,
+            cache_max_age,
+            immutable_max_age,
+            immutable_pattern,
+            content_encoding,
+            security_enabled,
+            cors_enabled,
+            range_header,
+            method,
+            if_none_match,
+            if_modified_since,
+            file_path_str,
+        )
+        raw_headers, status, final_length, raw_range, is_304 = raw
+        headers: list[tuple[bytes, bytes]] = [
+            (hname, hval) for hname, hval in raw_headers
+        ]
+        return (headers, status, final_length, raw_range, is_304)
+
+    # Python fallback
+    etag = compute_etag(file_size, mtime_ns)
+    last_modified = format_last_modified(mtime_ns)
+    from whitesnout.file_handler import is_hashed_file
+
+    is_hashed = is_hashed_file(filename, immutable_pattern)
+    if is_hashed:
+        cache_control = f"public, immutable, max-age={immutable_max_age}"
+    else:
+        cache_control = f"public, max-age={cache_max_age}"
+
+    from whitesnout.utils import guess_content_type
+
+    if file_path_str:
+        ext = file_path_str.rsplit(".", 1)[-1] if "." in file_path_str else ""
+        ct = _content_type_cache.get(ext)
+        if ct is None:
+            ct = guess_content_type(file_path_str, charset)
+            _content_type_cache[ext] = ct
+        content_type = ct
+    else:
+        content_type = guess_content_type(filename, charset)
+
+    # 304 check
+    if if_none_match is not None:
+        em = if_none_match.strip()
+        if em == "*" or em.strip('"') == etag.strip('"'):
+            headers = [
+                (b"etag", etag.encode()),
+                (b"last-modified", last_modified.encode()),
+                (b"cache-control", cache_control.encode()),
+            ]
+            if security_enabled:
+                headers.extend(
+                    [
+                        (b"x-content-type-options", b"nosniff"),
+                        (b"x-frame-options", b"DENY"),
+                    ]
+                )
+            if cors_enabled:
+                headers.append((b"access-control-allow-origin", b"*"))
+            return (headers, 304, 0, None, True)
+
+    if if_modified_since is not None:
+        try:
+            since_dt = email.utils.parsedate_to_datetime(if_modified_since)
+            lm_dt = email.utils.parsedate_to_datetime(last_modified)
+            if lm_dt is not None and since_dt is not None and lm_dt <= since_dt:
+                headers = [
+                    (b"etag", etag.encode()),
+                    (b"last-modified", last_modified.encode()),
+                    (b"cache-control", cache_control.encode()),
+                ]
+                if security_enabled:
+                    headers.extend(
+                        [
+                            (b"x-content-type-options", b"nosniff"),
+                            (b"x-frame-options", b"DENY"),
+                        ]
+                    )
+                if cors_enabled:
+                    headers.append((b"access-control-allow-origin", b"*"))
+                return (headers, 304, 0, None, True)
+        except (ValueError, TypeError, OverflowError):
+            pass
+
+    headers = [
+        (b"content-type", content_type.encode()),
+        (b"content-length", str(file_size).encode()),
+        (b"etag", etag.encode()),
+        (b"last-modified", last_modified.encode()),
+        (b"cache-control", cache_control.encode()),
+    ]
+    if security_enabled:
+        headers.extend(
+            [(b"x-content-type-options", b"nosniff"), (b"x-frame-options", b"DENY")]
+        )
+    if cors_enabled:
+        headers.append((b"access-control-allow-origin", b"*"))
+    if content_encoding:
+        headers.append((b"content-encoding", content_encoding.encode()))
+
+    status = 200
+    final_length = file_size
+    range_spec: tuple[int, int] | None = None
+
+    if method == "GET" and range_header:
+        parsed = parse_range(range_header, file_size)
+        if parsed is not None:
+            rstart, rend = parsed
+            status = 206
+            final_length = rend - rstart + 1
+            cr = build_content_range(rstart, rend, file_size)
+            headers.append((b"content-range", cr))
+            range_spec = (rstart, rend)
+
+    return (headers, status, final_length, range_spec, False)
 
 
 def check_304(

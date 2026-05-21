@@ -13,21 +13,14 @@ from whitesnout.file_handler import (
     sanitize_path,
 )
 from whitesnout.response import (
-    build_all_headers,
-    build_cache_control,
+    build_full_response,
     build_headers,
-    check_304,
-    compute_etag,
     error_headers,
-    format_last_modified,
     iter_chunks,
-    parse_range,
     redirect_headers,
-    security_headers,
     send_response,
 )
 from whitesnout.types import ASGIApp, ASGIReceive, ASGISend
-from whitesnout.utils import guess_content_type
 
 logger = logging.getLogger("whitesnout")
 
@@ -310,66 +303,53 @@ class WhiteSnout:
             file_size, mtime_ns = st.st_size, st.st_mtime_ns
             self._stat_cache.put(cache_key, file_size, mtime_ns)
 
-        etag = compute_etag(file_size, mtime_ns)
-        last_modified = format_last_modified(mtime_ns)
-        cache_control = build_cache_control(self.config, file_path.name)
-
-        # Parse Range header
-        range_header = None
+        # Extract relevant headers in a single pass
+        range_header: str | None = None
+        if_none_match: str | None = None
+        if_modified_since: str | None = None
         for name, value in scope.get("headers", []):
-            if name.lower() == b"range":
+            low = name.lower()
+            if low == b"range":
                 range_header = value.decode()
-                break
+            elif low == b"if-none-match":
+                if_none_match = value.decode()
+            elif low == b"if-modified-since":
+                if_modified_since = value.decode()
 
-        range_spec: tuple[int, int] | None = None
-        if range_header and scope["method"] == "GET":
-            range_spec = parse_range(range_header, file_size)
-            if range_spec is None:
-                sec = security_headers(self.config.security_headers)
-                cors = _cors_headers() if self.config.cors else []
-                body = self.config.error_responses.get(416, b"")
-                await send_response(
-                    send,
-                    416,
-                    [
-                        (b"content-range", f"bytes */{file_size}".encode()),
-                        *error_headers(416, body, self.config.error_responses),
-                        *sec,
-                        *cors,
-                    ],
-                    body,
-                )
-                return
-
-        if check_304(scope.get("headers", []), etag, last_modified):
-            sec = security_headers(self.config.security_headers)
-            cors = _cors_headers() if self.config.cors else []
-            await send_response(
-                send,
-                304,
-                [
-                    (b"etag", etag.encode()),
-                    (b"last-modified", last_modified.encode()),
-                    (b"cache-control", cache_control.encode()),
-                    *sec,
-                    *cors,
-                ],
-            )
-            return
-
-        content_type = guess_content_type(str(file_path), self.config.charset)
-        headers, status, content_length, range_spec = build_all_headers(
-            content_type=content_type,
-            content_length=file_size,
-            etag=etag,
-            last_modified=last_modified,
-            cache_control=cache_control,
+        headers, status, content_length, range_spec, is_304 = build_full_response(
+            file_size=file_size,
+            mtime_ns=mtime_ns,
+            filename=file_path.name,
+            charset=self.config.charset,
+            cache_max_age=self.config.cache_max_age,
+            immutable_max_age=self.config.immutable_max_age,
+            immutable_pattern=self.config.immutable_pattern,
             content_encoding=content_encoding,
             security_enabled=self.config.security_headers,
             cors_enabled=self.config.cors,
             range_header=range_header,
-            file_size=file_size,
+            method=scope["method"],
+            if_none_match=if_none_match,
+            if_modified_since=if_modified_since,
+            file_path_str=str(file_path),
         )
+
+        if is_304:
+            await send_response(send, 304, headers)
+            return
+
+        if status == 416:
+            body = self.config.error_responses.get(416, b"")
+            await send_response(
+                send,
+                416,
+                [
+                    *headers,
+                    *error_headers(416, body, self.config.error_responses),
+                ],
+                body,
+            )
+            return
 
         if scope["method"] == "HEAD":
             await send_response(send, status, headers)
