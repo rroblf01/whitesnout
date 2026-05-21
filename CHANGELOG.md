@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0 (2026-05-21)
+
+### Added
+
+- **Range Requests** — `Range: bytes=...` header parsed; returns 206 Partial Content with `Content-Range` and correct partial body; returns 416 Range Not Satisfiable for invalid ranges
+- **Security headers** — `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY` added to all responses by default; controllable via `security_headers=False` option
+- **Accept-Encoding quality values** — `parse_accept_encoding()` correctly sorts encodings by `q=` weight instead of naive substring match
+- **Compression flags honored** — `find_compressed()` now respects `allow_brotli` and `allow_gzip` parameters from config
+- **`security_headers()` response helper** — returns security header tuples based on config flag
+- **`parse_range()` and `build_content_range()` helpers** — new pure functions for range request handling
+
+### Changed
+
+- **`iter_chunks()`** — now accepts optional `start` and `end` parameters for streaming partial content
+- **`find_compressed()`** — uses quality-value-aware Accept-Encoding parsing
+- **304 responses** — now include security headers when enabled
+- **Config default** — `security_headers=True` by default
+
 ## 0.2.0 (2026-05-21)
 
 ### Added
