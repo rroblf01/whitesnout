@@ -23,8 +23,9 @@ jobs:
         with:
           python-version: "3.14"
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      # Rust on host: used by macOS/Windows (cibuildwheel runs natively).
+      # Linux uses Docker containers — Rust is installed via before-all in pyproject.toml.
+      - uses: dtolnay/rust-toolchain@stable
 
       - uses: pypa/cibuildwheel@v2.23
         with:

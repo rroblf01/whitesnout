@@ -32,8 +32,12 @@ dev = [
 
 [tool.cibuildwheel]
 build = "cp3{10,11,12,13,14}-*"
-skip = ["*-manylinux_i686", "*-musllinux_i686"]
-# musllinux is skipped on x86_64/arm64 by default in cibuildwheel
+skip = ["*-manylinux_i686", "*-musllinux_i686", "*-win32"]
+
+[tool.cibuildwheel.linux]
+# Linux uses Docker containers — Rust must be installed inside them
+before-all = "curl -fsSL https://sh.rustup.rs | sh -s -- --default-toolchain stable -y --profile minimal 2>&1"
+environment = { PATH = "$HOME/.cargo/bin:$PATH" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
