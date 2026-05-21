@@ -50,18 +50,18 @@ class WhiteSnout:
         self,
         app: ASGIApp | None = None,
         *,
-        directory: str = "static",
-        index_file: str = "index.html",
-        cache_max_age: int = 3600,
-        immutable_max_age: int = 31536000,
-        immutable_pattern: str = r"\.[a-f0-9]{8,}\.",
-        chunk_size: int = 65536,
-        charset: str = "utf-8",
-        brotli: bool = True,
-        gzip: bool = True,
-        max_cache_size: int = 100,
-        security_headers: bool = True,
-        cors: bool = False,
+        directory: str | None = None,
+        index_file: str | None = None,
+        cache_max_age: int | None = None,
+        immutable_max_age: int | None = None,
+        immutable_pattern: str | None = None,
+        chunk_size: int | None = None,
+        charset: str | None = None,
+        brotli: bool | None = None,
+        gzip: bool | None = None,
+        max_cache_size: int | None = None,
+        security_headers: bool | None = None,
+        cors: bool | None = None,
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -79,7 +79,7 @@ class WhiteSnout:
             cors=cors,
         )
         self._stat_cache: LRUCache[str, os.stat_result] = LRUCache(
-            maxsize=max_cache_size
+            maxsize=max_cache_size if max_cache_size is not None else 100
         )
 
     def invalidate_cache(self) -> None:

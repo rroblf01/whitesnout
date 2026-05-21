@@ -7,7 +7,7 @@ authors = [
     { name = "Ricardo Robles", email = "ricardo.r.f@hotmail.com" }
 ]
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["aiofiles>=24.1.0"]
 
 [project.optional-dependencies]
 compress = ["brotli"]
@@ -25,6 +25,7 @@ python-source = "src"
 
 [dependency-groups]
 dev = [
+    "aiofiles>=24.1.0",
     "asgiref>=3.11.1",
     "brotli>=1.2.0",
     "fastapi>=0.136.1",

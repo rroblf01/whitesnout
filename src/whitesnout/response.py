@@ -7,6 +7,14 @@ from pathlib import Path
 
 from whitesnout.config import Config
 
+_AIO_AVAILABLE = False
+try:
+    import aiofiles
+
+    _AIO_AVAILABLE = True
+except ImportError:
+    pass
+
 
 async def iter_chunks(
     path: Path,
@@ -14,18 +22,35 @@ async def iter_chunks(
     start: int = 0,
     end: int | None = None,
 ) -> AsyncGenerator[bytes, None]:
-    with open(path, "rb") as f:
-        if start:
-            f.seek(start)
-        remaining = None if end is None else (end - start + 1)
-        while remaining is None or remaining > 0:
-            to_read = chunk_size if remaining is None else min(chunk_size, remaining)
-            chunk = f.read(to_read)
-            if not chunk:
-                break
-            yield chunk
-            if remaining is not None:
-                remaining -= len(chunk)
+    remaining = None if end is None else (end - start + 1)
+    if _AIO_AVAILABLE:
+        async with aiofiles.open(path, "rb") as f:  # type: ignore[attr-defined]
+            if start:
+                await f.seek(start)
+            while remaining is None or remaining > 0:
+                to_read = (
+                    chunk_size if remaining is None else min(chunk_size, remaining)
+                )
+                chunk = await f.read(to_read)
+                if not chunk:
+                    break
+                yield chunk
+                if remaining is not None:
+                    remaining -= len(chunk)
+    else:
+        with open(path, "rb") as f:
+            if start:
+                f.seek(start)
+            while remaining is None or remaining > 0:
+                to_read = (
+                    chunk_size if remaining is None else min(chunk_size, remaining)
+                )
+                chunk = f.read(to_read)
+                if not chunk:
+                    break
+                yield chunk
+                if remaining is not None:
+                    remaining -= len(chunk)
 
 
 def build_headers(

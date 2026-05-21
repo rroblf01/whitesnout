@@ -464,6 +464,57 @@ async def test_logging(caplog: pytest.LogCaptureFixture) -> None:
     assert caplog.records[-1].name == "whitesnout"
 
 
+def test_env_config_overrides_defaults() -> None:
+    import os
+
+    from whitesnout.config import Config
+
+    os.environ["WHITESNOUT_DIRECTORY"] = "/custom/static"
+    os.environ["WHITESNOUT_CORS"] = "true"
+    os.environ["WHITESNOUT_CACHE_MAX_AGE"] = "7200"
+    try:
+        cfg = Config()
+        assert cfg.directory == "/custom/static"
+        assert cfg.cors is True
+        assert cfg.cache_max_age == 7200
+    finally:
+        del os.environ["WHITESNOUT_DIRECTORY"]
+        del os.environ["WHITESNOUT_CORS"]
+        del os.environ["WHITESNOUT_CACHE_MAX_AGE"]
+
+
+def test_env_config_explicit_kwargs_take_precedence() -> None:
+    import os
+
+    from whitesnout.config import Config
+
+    os.environ["WHITESNOUT_DIRECTORY"] = "/env/static"
+    os.environ["WHITESNOUT_CORS"] = "true"
+    try:
+        cfg = Config(directory="/explicit/static", cors=False)
+        assert cfg.directory == "/explicit/static"
+        assert cfg.cors is False
+    finally:
+        del os.environ["WHITESNOUT_DIRECTORY"]
+        del os.environ["WHITESNOUT_CORS"]
+
+
+def test_env_config_invalid_values_ignored() -> None:
+    import os
+
+    from whitesnout.config import Config
+
+    os.environ["WHITESNOUT_CACHE_MAX_AGE"] = "not_a_number"
+    os.environ["WHITESNOUT_CORS"] = "nonsense"
+    try:
+        cfg = Config()
+        assert cfg.cache_max_age == 3600
+        assert cfg.cors is False
+    finally:
+        del os.environ["WHITESNOUT_CACHE_MAX_AGE"]
+        del os.environ["WHITESNOUT_CORS"]
+
+
 async def client_get(
     app, path: str, accept_encoding: str = "", extra_headers: list | None = None
 ) -> dict:
