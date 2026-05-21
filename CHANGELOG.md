@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/rroblf01/whitesnout/compare/v0.1.0...v0.1.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* add x86_64-apple-darwin Rust target for macOS cross-compilation ([c68642a](https://github.com/rroblf01/whitesnout/commit/c68642a8fc5e6c5b42c9af535ba388ffe805e7ef))
+
 ## 0.1.0 (2026-05-21)
 
 ### Added
