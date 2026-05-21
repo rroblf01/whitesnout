@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
+from whitesnout.file_handler import clear_compressed_cache
 from whitesnout.types import ASGIApp
+
+
+@pytest.fixture(autouse=True)
+def _clear_compressed_cache() -> None:
+    clear_compressed_cache()
 
 
 class ASGITestClient:

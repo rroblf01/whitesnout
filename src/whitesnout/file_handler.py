@@ -9,12 +9,22 @@ from pathlib import Path
 _RUST_AVAILABLE = False
 
 try:
-    from whitesnout._rs import find_compressed as _rs_find_compressed
-    from whitesnout._rs import is_hashed_file as _rs_is_hashed_file
-    from whitesnout._rs import parse_accept_encoding as _rs_parse_accept_encoding
+    from whitesnout._rs import (
+        clear_compressed_cache as _rs_clear_compressed_cache,
+    )
+    from whitesnout._rs import (
+        find_compressed as _rs_find_compressed,
+    )
+    from whitesnout._rs import (
+        is_hashed_file as _rs_is_hashed_file,
+    )
+    from whitesnout._rs import (
+        parse_accept_encoding as _rs_parse_accept_encoding,
+    )
 
     _RUST_AVAILABLE = True
 except ImportError:
+    _rs_clear_compressed_cache = None  # type: ignore[assignment]
     _rs_find_compressed = None  # type: ignore[assignment]
     _rs_is_hashed_file = None  # type: ignore[assignment]
     _rs_parse_accept_encoding = None  # type: ignore[assignment]
@@ -127,3 +137,9 @@ def find_compressed(
                 return gz_path, "gzip"
 
     return None
+
+
+def clear_compressed_cache() -> None:
+    """Clear the negative compressed-file cache used by find_compressed."""
+    if _RUST_AVAILABLE and _rs_clear_compressed_cache is not None:
+        _rs_clear_compressed_cache()

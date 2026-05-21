@@ -25,13 +25,6 @@ from whitesnout.types import ASGIApp, ASGIReceive, ASGISend
 logger = logging.getLogger("whitesnout")
 
 
-def _get_accept_encoding(scope: dict) -> str:
-    for name, value in scope.get("headers", []):
-        if name.lower() == b"accept-encoding":
-            return value.decode()
-    return ""
-
-
 def _cors_headers() -> list[tuple[bytes, bytes]]:
     return [(b"access-control-allow-origin", b"*")]
 
@@ -80,6 +73,7 @@ def _resolve_directory_path(
 class WhiteSnout:
     __slots__ = (
         "config",
+        "_app",
         "_stat_cache",
         "_extra_files",
         "_extra_dirs",
@@ -108,7 +102,6 @@ class WhiteSnout:
     ) -> None:
         self.config = Config(
             directory=directory,
-            app=app,
             index_file=index_file,
             cache_max_age=cache_max_age,
             immutable_max_age=immutable_max_age,
@@ -124,6 +117,7 @@ class WhiteSnout:
             log_level=log_level,
             sync_threshold=sync_threshold,
         )
+        self._app = app
         self._stat_cache: StatCache = StatCache(
             maxsize=max_cache_size if max_cache_size is not None else 100
         )
@@ -192,14 +186,14 @@ class WhiteSnout:
         t0 = time.perf_counter()
 
         if scope["type"] != "http":
-            app = self.config.app
+            app = self._app
             if app is not None:
                 await app(scope, receive, send)
             return
 
         if scope["method"] not in ("GET", "HEAD") and scope["method"] != "OPTIONS":
-            if self.config.app is not None:
-                await self.config.app(scope, receive, send)
+            if self._app is not None:
+                await self._app(scope, receive, send)
             else:
                 body = self.config.error_responses.get(405, b"")
                 await send_response(
@@ -256,8 +250,8 @@ class WhiteSnout:
                 if index is not None:
                     file_path = index
                 else:
-                    if self.config.app is not None:
-                        await self.config.app(scope, receive, send)
+                    if self._app is not None:
+                        await self._app(scope, receive, send)
                     else:
                         body = self.config.error_responses.get(404, b"")
                         await send_response(
@@ -268,8 +262,8 @@ class WhiteSnout:
                         )
                     return
             else:
-                if self.config.app is not None:
-                    await self.config.app(scope, receive, send)
+                if self._app is not None:
+                    await self._app(scope, receive, send)
                 else:
                     body = self.config.error_responses.get(404, b"")
                     await send_response(
@@ -280,7 +274,22 @@ class WhiteSnout:
                     )
                 return
 
-        accept_encoding = _get_accept_encoding(scope)
+        # Extract relevant headers in a single pass
+        range_header: str | None = None
+        if_none_match: str | None = None
+        if_modified_since: str | None = None
+        accept_encoding = ""
+        for name, value in scope.get("headers", []):
+            low = name.lower()
+            if low == b"range":
+                range_header = value.decode()
+            elif low == b"if-none-match":
+                if_none_match = value.decode()
+            elif low == b"if-modified-since":
+                if_modified_since = value.decode()
+            elif low == b"accept-encoding":
+                accept_encoding = value.decode()
+
         compressed = find_compressed(
             file_path,
             accept_encoding,

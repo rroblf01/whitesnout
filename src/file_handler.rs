@@ -1,4 +1,25 @@
 use pyo3::prelude::*;
+use std::collections::HashSet;
+use std::sync::Mutex;
+
+const NEG_CACHE_MAX: usize = 2000;
+static NEG_COMPRESSED_CACHE: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+
+fn neg_cache_contains(file_path: &str) -> bool {
+    let mut cache = NEG_COMPRESSED_CACHE.lock().unwrap();
+    let set = cache.get_or_insert_with(HashSet::new);
+    if set.len() >= NEG_CACHE_MAX {
+        set.clear();
+    }
+    set.contains(file_path)
+}
+
+fn neg_cache_insert(file_path: &str) {
+    if let Ok(mut cache) = NEG_COMPRESSED_CACHE.lock() {
+        let set = cache.get_or_insert_with(HashSet::new);
+        set.insert(file_path.to_string());
+    }
+}
 
 #[pyfunction]
 pub fn parse_accept_encoding(header: &str) -> Vec<String> {
@@ -43,6 +64,13 @@ pub fn find_compressed(
     allow_brotli: bool,
     allow_gzip: bool,
 ) -> Option<(String, String)> {
+    if accept_encoding.is_empty() {
+        return None;
+    }
+    if neg_cache_contains(file_path) {
+        return None;
+    }
+
     let encodings = parse_accept_encoding(accept_encoding);
 
     for enc in &encodings {
@@ -60,10 +88,16 @@ pub fn find_compressed(
         }
     }
 
+    neg_cache_insert(file_path);
     None
 }
 
-use std::sync::Mutex;
+#[pyfunction]
+pub fn clear_compressed_cache() {
+    if let Ok(mut cache) = NEG_COMPRESSED_CACHE.lock() {
+        *cache = None;
+    }
+}
 
 static REGEX_CACHE: Mutex<Option<(String, regex::Regex)>> = Mutex::new(None);
 

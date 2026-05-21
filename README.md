@@ -278,8 +278,8 @@ Results measured with `benchmarks/benchmark.py` — 500 requests (10 concurrent)
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
 |---|---|---|---|---|
-| **whitesnout** | **960** | 6.0 | 91.1 | 31.5 |
-| whitenoise | 927 | 5.9 | 142.7 | 28.5 |
+| **whitesnout** | **934** | 6.6 | 49.8 | 31.6 |
+| whitenoise | 846 | 6.1 | 72.5 | 28.3 |
 
 > **Platform**: Linux x86_64 · **Python**: 3.14.5 · **uvicorn**: 0.47.0
 

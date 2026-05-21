@@ -3,8 +3,6 @@ from __future__ import annotations
 import os
 from contextlib import suppress
 
-from whitesnout.types import ASGIApp
-
 ENV_PREFIX = "WHITESNOUT_"
 
 
@@ -42,7 +40,6 @@ def _read_env() -> dict:
 class Config:
     __slots__ = (
         "directory",
-        "app",
         "index_file",
         "cache_max_age",
         "immutable_max_age",
@@ -63,7 +60,6 @@ class Config:
         self,
         *,
         directory: str | None = None,
-        app: ASGIApp | None = None,
         index_file: str | None = None,
         cache_max_age: int | None = None,
         immutable_max_age: int | None = None,
@@ -84,7 +80,6 @@ class Config:
         self.directory = (
             directory if directory is not None else env.get("directory", "static")
         )  # type: ignore[assignment]
-        self.app = app
         self.index_file = (
             index_file
             if index_file is not None
