@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
-import stat as stat_module
 from contextlib import suppress
 from pathlib import Path
 
@@ -44,6 +42,8 @@ def sanitize_path(root: str, requested_path: str) -> Path | None:
         st = full.stat()
     except OSError:
         return None
+    import stat as stat_module
+
     if not stat_module.S_ISREG(st.st_mode):
         return None
     return full
@@ -81,6 +81,8 @@ def file_stat(path: Path) -> os.stat_result | None:
 def is_hashed_file(filename: str, pattern: str) -> bool:
     if _RUST_AVAILABLE:
         return _rs_is_hashed_file(filename, pattern)  # ty: ignore[call-non-callable]
+    import re
+
     return bool(re.search(pattern, filename))
 
 

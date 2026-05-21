@@ -7,10 +7,11 @@ authors = [
     { name = "Ricardo Robles", email = "ricardo.r.f@hotmail.com" }
 ]
 requires-python = ">=3.10"
-dependencies = ["aiofiles>=24.1.0"]
+dependencies = []
 
 [project.optional-dependencies]
 compress = ["brotli"]
+streaming = ["aiofiles>=24.1.0"]
 
 [project.scripts]
 whitesnout = "whitesnout.cli:main"

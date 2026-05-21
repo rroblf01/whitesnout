@@ -12,6 +12,8 @@ def _clear_compressed_cache() -> None:
 
 
 class ASGITestClient:
+    __slots__ = ("app",)
+
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 

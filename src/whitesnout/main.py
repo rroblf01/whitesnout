@@ -1,20 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from pathlib import Path
 
-from whitesnout.cache import StatCache
+from whitesnout.cache import LRUCache, StatCache
 from whitesnout.config import Config
 from whitesnout.file_handler import (
-    find_compressed,
     resolve_directory,
     resolve_index,
     sanitize_path,
 )
 from whitesnout.response import (
-    build_full_response,
     build_headers,
+    build_response_pipeline,
     error_headers,
     iter_chunks,
     redirect_headers,
@@ -23,6 +23,30 @@ from whitesnout.response import (
 from whitesnout.types import ASGIApp, ASGIReceive, ASGISend
 
 logger = logging.getLogger("whitesnout")
+
+
+def _read_full(path: Path) -> bytes:
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def _read_range(path: Path, start: int, length: int) -> bytes:
+    with open(path, "rb") as f:
+        if start:
+            f.seek(start)
+        return f.read(length)
+
+
+def _log_request(method: str, path: str, status: int, length: int, t0: float) -> None:
+    if logger.isEnabledFor(logging.INFO):
+        logger.info(
+            "%s %s %s %s %.1fms",
+            method,
+            path,
+            status,
+            length,
+            (time.perf_counter() - t0) * 1000,
+        )
 
 
 def _cors_headers() -> list[tuple[bytes, bytes]]:
@@ -75,6 +99,8 @@ class WhiteSnout:
         "config",
         "_app",
         "_stat_cache",
+        "_stat_cache_impl",
+        "_path_cache",
         "_extra_files",
         "_extra_dirs",
         "_log_handler",
@@ -119,7 +145,11 @@ class WhiteSnout:
         )
         self._app = app
         self._stat_cache: StatCache = StatCache(
-            maxsize=max_cache_size if max_cache_size is not None else 100
+            maxsize=max_cache_size if max_cache_size is not None else 64
+        )
+        self._stat_cache_impl = self._stat_cache._impl
+        self._path_cache: LRUCache[str, Path | None] = LRUCache(
+            maxsize=max_cache_size if max_cache_size is not None else 64
         )
         self._extra_files: dict[str, Path] = {}
         self._extra_dirs: list[tuple[str, Path]] = []
@@ -127,12 +157,10 @@ class WhiteSnout:
         self._setup_logging()
 
     def _setup_logging(self) -> None:
+        logger.handlers.clear()
         if self.config.log_level is None:
-            logger.handlers.clear()
-            logger.addHandler(logging.NullHandler())
             logger.setLevel(logging.CRITICAL + 1)
         else:
-            logger.handlers.clear()
             handler = logging.StreamHandler()
             handler.setFormatter(
                 logging.Formatter(
@@ -152,11 +180,13 @@ class WhiteSnout:
                 "/favicon.ico": "branding/favicon.ico",
             })
         """
+        self._path_cache.clear()
         for path, file_path in files.items():
             self._extra_files[path] = Path(file_path)
 
     def remove_files(self, *paths: str) -> None:
         """Remove previously registered extra files."""
+        self._path_cache.clear()
         for path in paths:
             self._extra_files.pop(path, None)
 
@@ -167,15 +197,18 @@ class WhiteSnout:
             app.add_directory("/media", "/mnt/media")
             # GET /media/video.mp4 -> /mnt/media/video.mp4
         """
+        self._path_cache.clear()
         self._extra_dirs.append((prefix, Path(directory)))
 
     def remove_directory(self, prefix: str) -> None:
         """Remove a previously registered extra directory."""
+        self._path_cache.clear()
         self._extra_dirs = [(p, d) for p, d in self._extra_dirs if p != prefix]
 
     def invalidate_cache(self) -> None:
-        """Purge the stat cache."""
+        """Purge all caches."""
         self._stat_cache.clear()
+        self._path_cache.clear()
 
     async def __call__(
         self,
@@ -183,7 +216,9 @@ class WhiteSnout:
         receive: ASGIReceive,
         send: ASGISend,
     ) -> None:
-        t0 = time.perf_counter()
+        config = self.config
+        log_enabled = config.log_level is not None
+        t0 = time.perf_counter() if log_enabled else 0.0
 
         if scope["type"] != "http":
             app = self._app
@@ -191,29 +226,30 @@ class WhiteSnout:
                 await app(scope, receive, send)
             return
 
-        if scope["method"] not in ("GET", "HEAD") and scope["method"] != "OPTIONS":
+        method = scope["method"]
+        if method not in ("GET", "HEAD") and method != "OPTIONS":
             if self._app is not None:
                 await self._app(scope, receive, send)
             else:
-                body = self.config.error_responses.get(405, b"")
+                body = config.error_responses.get(405, b"")
                 await send_response(
                     send,
                     405,
-                    error_headers(405, body, self.config.error_responses),
+                    error_headers(405, body, config.error_responses),
                     body,
                 )
             return
 
         # CORS preflight
-        if scope["method"] == "OPTIONS":
-            if self.config.cors:
+        if method == "OPTIONS":
+            if config.cors:
                 extra = _cors_headers()
             else:
-                body = self.config.error_responses.get(405, b"")
+                body = config.error_responses.get(405, b"")
                 await send_response(
                     send,
                     405,
-                    error_headers(405, body, self.config.error_responses),
+                    error_headers(405, body, config.error_responses),
                     body,
                 )
                 return
@@ -225,20 +261,26 @@ class WhiteSnout:
             await send_response(send, 204, headers)
             return
 
-        path = scope["path"].split("?")[0]
-        file_path = _resolve_requested_path(
-            self.config, path, self._extra_files, self._extra_dirs
-        )
+        path = scope["path"]
+
+        cached = self._path_cache.get(path)
+        if cached is not None:
+            file_path = cached
+        else:
+            file_path = _resolve_requested_path(
+                config, path, self._extra_files, self._extra_dirs
+            )
+            self._path_cache.put(path, file_path)
 
         if file_path is None:
-            dir_path = _resolve_directory_path(self.config, path, self._extra_dirs)
+            dir_path = _resolve_directory_path(config, path, self._extra_dirs)
             if dir_path is not None:
                 if not path.endswith("/"):
                     redirect_to = path + "/"
                     qs = scope.get("query_string", b"")
                     if qs:
                         redirect_to += "?" + qs.decode()
-                    body = self.config.error_responses.get(301, b"")
+                    body = config.error_responses.get(301, b"")
                     await send_response(
                         send,
                         301,
@@ -246,18 +288,18 @@ class WhiteSnout:
                         body,
                     )
                     return
-                index = resolve_index(dir_path, self.config.index_file)
+                index = resolve_index(dir_path, config.index_file)
                 if index is not None:
                     file_path = index
                 else:
                     if self._app is not None:
                         await self._app(scope, receive, send)
                     else:
-                        body = self.config.error_responses.get(404, b"")
+                        body = config.error_responses.get(404, b"")
                         await send_response(
                             send,
                             404,
-                            error_headers(404, body, self.config.error_responses),
+                            error_headers(404, body, config.error_responses),
                             body,
                         )
                     return
@@ -265,11 +307,11 @@ class WhiteSnout:
                 if self._app is not None:
                     await self._app(scope, receive, send)
                 else:
-                    body = self.config.error_responses.get(404, b"")
+                    body = config.error_responses.get(404, b"")
                     await send_response(
                         send,
                         404,
-                        error_headers(404, body, self.config.error_responses),
+                        error_headers(404, body, config.error_responses),
                         body,
                     )
                 return
@@ -290,80 +332,88 @@ class WhiteSnout:
             elif low == b"accept-encoding":
                 accept_encoding = value.decode()
 
-        compressed = find_compressed(
+        (
+            serve_path,
+            headers,
+            status,
+            content_length,
+            range_spec,
+            is_304,
+            _content_encoding,
+        ) = build_response_pipeline(
             file_path,
+            self._stat_cache_impl,
             accept_encoding,
-            allow_brotli=self.config.brotli,
-            allow_gzip=self.config.gzip,
-        )
-
-        if compressed is not None:
-            serve_path, content_encoding = compressed
-        else:
-            serve_path = file_path
-            content_encoding = None
-
-        cache_key = str(serve_path)
-        cached = self._stat_cache.get(cache_key)
-        if cached is not None:
-            file_size, mtime_ns = cached
-        else:
-            st = serve_path.stat()
-            file_size, mtime_ns = st.st_size, st.st_mtime_ns
-            self._stat_cache.put(cache_key, file_size, mtime_ns)
-
-        # Extract relevant headers in a single pass
-        range_header: str | None = None
-        if_none_match: str | None = None
-        if_modified_since: str | None = None
-        for name, value in scope.get("headers", []):
-            low = name.lower()
-            if low == b"range":
-                range_header = value.decode()
-            elif low == b"if-none-match":
-                if_none_match = value.decode()
-            elif low == b"if-modified-since":
-                if_modified_since = value.decode()
-
-        headers, status, content_length, range_spec, is_304 = build_full_response(
-            file_size=file_size,
-            mtime_ns=mtime_ns,
+            allow_brotli=config.brotli,
+            allow_gzip=config.gzip,
             filename=file_path.name,
-            charset=self.config.charset,
-            cache_max_age=self.config.cache_max_age,
-            immutable_max_age=self.config.immutable_max_age,
-            immutable_pattern=self.config.immutable_pattern,
-            content_encoding=content_encoding,
-            security_enabled=self.config.security_headers,
-            cors_enabled=self.config.cors,
+            charset=config.charset,
+            cache_max_age=config.cache_max_age,
+            immutable_max_age=config.immutable_max_age,
+            immutable_pattern=config.immutable_pattern,
+            security_enabled=config.security_headers,
+            cors_enabled=config.cors,
             range_header=range_header,
-            method=scope["method"],
+            method=method,
             if_none_match=if_none_match,
             if_modified_since=if_modified_since,
-            file_path_str=str(file_path),
         )
 
         if is_304:
             await send_response(send, 304, headers)
+            if log_enabled:
+                _log_request(method, path, 304, 0, t0)
             return
 
         if status == 416:
-            body = self.config.error_responses.get(416, b"")
+            body = config.error_responses.get(416, b"")
             await send_response(
                 send,
                 416,
                 [
                     *headers,
-                    *error_headers(416, body, self.config.error_responses),
+                    *error_headers(416, body, config.error_responses),
                 ],
                 body,
             )
+            if log_enabled:
+                _log_request(method, path, 416, len(body), t0)
             return
 
-        if scope["method"] == "HEAD":
+        if method == "HEAD":
             await send_response(send, status, headers)
+            if log_enabled:
+                _log_request(method, path, status, content_length, t0)
             return
 
+        # Fast path: small file fits in one read, single send pair
+        if content_length <= config.sync_threshold:
+            if range_spec is not None:
+                rstart, rend = range_spec
+                body = await asyncio.to_thread(
+                    _read_range, serve_path, rstart, rend - rstart + 1
+                )
+            else:
+                body = await asyncio.to_thread(_read_full, serve_path)
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": status,
+                    "headers": headers,
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": body,
+                    "more_body": False,
+                }
+            )
+            if log_enabled:
+                _log_request(method, path, status, content_length, t0)
+            return
+
+        # Streaming path for large files
         await send(
             {
                 "type": "http.response.start",
@@ -374,11 +424,11 @@ class WhiteSnout:
 
         async for chunk in iter_chunks(
             serve_path,
-            self.config.chunk_size,
+            config.chunk_size,
             start=range_spec[0] if range_spec else 0,
             end=range_spec[1] if range_spec else None,
-            sync_threshold=self.config.sync_threshold,
-            file_size=file_size,
+            sync_threshold=config.sync_threshold,
+            file_size=content_length,
         ):
             await send(
                 {
@@ -395,13 +445,5 @@ class WhiteSnout:
             }
         )
 
-        if self.config.log_level is not None:
-            elapsed = time.perf_counter() - t0
-            logger.info(
-                "%s %s %s %s %.1fms",
-                scope["method"],
-                path,
-                status,
-                content_length,
-                elapsed * 1000,
-            )
+        if log_enabled:
+            _log_request(method, path, status, content_length, t0)

@@ -622,13 +622,13 @@ wheels = [
 name = "whitesnout"
 version = "2.0.0"
 source = { editable = "." }
-dependencies = [
-    { name = "aiofiles" },
-]
 
 [package.optional-dependencies]
 compress = [
     { name = "brotli" },
+]
+streaming = [
+    { name = "aiofiles" },
 ]
 
 [package.dev-dependencies]
@@ -649,10 +649,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiofiles", specifier = ">=24.1.0" },
+    { name = "aiofiles", marker = "extra == 'streaming'", specifier = ">=24.1.0" },
     { name = "brotli", marker = "extra == 'compress'" },
 ]
-provides-extras = ["compress"]
+provides-extras = ["compress", "streaming"]
 
 [package.metadata.requires-dev]
 dev = [

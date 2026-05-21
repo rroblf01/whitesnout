@@ -24,5 +24,6 @@ fn _rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(response::check_304, m)?)?;
     m.add_function(wrap_pyfunction!(response::build_all_headers, m)?)?;
     m.add_function(wrap_pyfunction!(response::build_full_response, m)?)?;
+    m.add_function(wrap_pyfunction!(response::build_full_response_v2, m)?)?;
     Ok(())
 }

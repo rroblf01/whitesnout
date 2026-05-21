@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import email.utils
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -21,6 +20,9 @@ try:
     )
     from whitesnout._rs import (
         build_full_response as _rs_build_full_response,
+    )
+    from whitesnout._rs import (
+        build_full_response_v2 as _rs_build_full_response_v2,
     )
     from whitesnout._rs import (
         build_headers as _rs_build_headers,
@@ -45,13 +47,21 @@ try:
 except ImportError:
     pass
 
-_AIO_AVAILABLE = False
-try:
-    import aiofiles
+_aiofiles = None
+_aiofiles_checked = False
 
-    _AIO_AVAILABLE = True
-except ImportError:
-    pass
+
+def _get_aiofiles():
+    global _aiofiles, _aiofiles_checked
+    if not _aiofiles_checked:
+        _aiofiles_checked = True
+        try:
+            import aiofiles as _aio  # type: ignore[import-not-found]
+
+            _aiofiles = _aio
+        except ImportError:
+            _aiofiles = None
+    return _aiofiles
 
 
 async def iter_chunks(
@@ -78,8 +88,9 @@ async def iter_chunks(
         yield await asyncio.to_thread(_read)
         return
 
-    if _AIO_AVAILABLE:
-        async with aiofiles.open(path, "rb") as f:  # type: ignore[attr-defined]
+    aio = _get_aiofiles()
+    if aio is not None:
+        async with aio.open(path, "rb") as f:
             if start:
                 await f.seek(start)
             while remaining is None or remaining > 0:
@@ -217,7 +228,9 @@ def compute_etag(size: int, mtime_ns: int) -> str:
 def format_last_modified(mtime_ns: int) -> str:
     if _RUST_AVAILABLE:
         return _rs_format_last_modified(mtime_ns)
-    return email.utils.formatdate(mtime_ns / 1_000_000_000, usegmt=True)
+    import email.utils as _eu
+
+    return _eu.formatdate(mtime_ns / 1_000_000_000, usegmt=True)
 
 
 def build_cache_control(config: Config, filename: str) -> str:
@@ -383,8 +396,9 @@ def build_full_response(
 
     if if_modified_since is not None:
         try:
-            since_dt = email.utils.parsedate_to_datetime(if_modified_since)
-            lm_dt = email.utils.parsedate_to_datetime(last_modified)
+            import email.utils as _eu  # noqa: PLC0415
+            since_dt = _eu.parsedate_to_datetime(if_modified_since)
+            lm_dt = _eu.parsedate_to_datetime(last_modified)
             if lm_dt is not None and since_dt is not None and lm_dt <= since_dt:
                 headers = [
                     (b"etag", etag.encode()),
@@ -437,6 +451,107 @@ def build_full_response(
     return (headers, status, final_length, range_spec, False)
 
 
+def build_response_pipeline(
+    file_path: Path,
+    stat_cache_impl,
+    accept_encoding: str,
+    *,
+    allow_brotli: bool,
+    allow_gzip: bool,
+    filename: str,
+    charset: str,
+    cache_max_age: int,
+    immutable_max_age: int,
+    immutable_pattern: str,
+    security_enabled: bool,
+    cors_enabled: bool,
+    range_header: str | None,
+    method: str,
+    if_none_match: str | None,
+    if_modified_since: str | None,
+) -> tuple[Path, list[tuple[bytes, bytes]], int, int, tuple[int, int] | None, bool, str | None]:
+    file_path_str = str(file_path)
+    if _RUST_AVAILABLE:
+        try:
+            from whitesnout._rs import StatCache as _RustStatCache  # type: ignore
+        except ImportError:
+            _RustStatCache = None  # type: ignore
+
+        if _RustStatCache is not None and isinstance(stat_cache_impl, _RustStatCache):
+            (
+                serve_path_str,
+                raw_headers,
+                status,
+                content_length,
+                range_spec,
+                is_304,
+                _content_encoding,
+            ) = _rs_build_full_response_v2(
+                file_path_str,
+                stat_cache_impl,
+                accept_encoding,
+                allow_brotli,
+                allow_gzip,
+                filename,
+                charset,
+                cache_max_age,
+                immutable_max_age,
+                immutable_pattern,
+                security_enabled,
+                cors_enabled,
+                range_header,
+                method,
+                if_none_match,
+                if_modified_since,
+            )
+            serve_path = file_path if serve_path_str == file_path_str else Path(serve_path_str)
+            headers: list[tuple[bytes, bytes]] = list(raw_headers)
+            return (serve_path, headers, status, content_length, range_spec, is_304, _content_encoding)
+
+    # Python / non-fused fallback
+    from whitesnout.file_handler import find_compressed
+
+    compressed = find_compressed(
+        file_path,
+        accept_encoding,
+        allow_brotli=allow_brotli,
+        allow_gzip=allow_gzip,
+    )
+    if compressed is not None:
+        serve_path, content_encoding = compressed
+    else:
+        serve_path = file_path
+        content_encoding = None
+
+    cache_key = str(serve_path)
+    cached = stat_cache_impl.get(cache_key)
+    if cached is not None:
+        file_size, mtime_ns = cached
+    else:
+        st = serve_path.stat()
+        file_size, mtime_ns = st.st_size, st.st_mtime_ns
+        stat_cache_impl.put(cache_key, file_size, mtime_ns)
+
+    headers, status, content_length, range_spec, is_304 = build_full_response(
+        file_size=file_size,
+        mtime_ns=mtime_ns,
+        filename=filename,
+        charset=charset,
+        cache_max_age=cache_max_age,
+        immutable_max_age=immutable_max_age,
+        immutable_pattern=immutable_pattern,
+        content_encoding=content_encoding,
+        security_enabled=security_enabled,
+        cors_enabled=cors_enabled,
+        range_header=range_header,
+        method=method,
+        if_none_match=if_none_match,
+        if_modified_since=if_modified_since,
+        file_path_str=file_path_str,
+    )
+    return (serve_path, headers, status, content_length, range_spec, is_304, content_encoding)
+
+
 def check_304(
     request_headers: list[tuple[bytes, bytes]],
     etag: str,
@@ -467,8 +582,9 @@ def check_304(
 
     if modified_since is not None:
         try:
-            since_dt = email.utils.parsedate_to_datetime(modified_since)
-            lm_dt = email.utils.parsedate_to_datetime(last_modified)
+            import email.utils as _eu  # noqa: PLC0415
+            since_dt = _eu.parsedate_to_datetime(modified_since)
+            lm_dt = _eu.parsedate_to_datetime(last_modified)
             if lm_dt is not None and since_dt is not None and lm_dt <= since_dt:
                 return True
         except (ValueError, TypeError, OverflowError):

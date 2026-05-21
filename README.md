@@ -64,11 +64,14 @@ $ pip install whitesnout
 
 Requires Python **≥ 3.10**.
 
-The compress CLI needs Brotli:
+No required runtime dependencies. Optional extras:
 
 ```console
-$ uv add 'whitesnout[compress]'
+$ uv add 'whitesnout[compress]'   # Brotli for the compress CLI
+$ uv add 'whitesnout[streaming]'  # aiofiles for true async streaming of large files
 ```
+
+Small files (≤ `sync_threshold`, default 64 KB) are served via a single threaded read — no extra dependency needed. The `streaming` extra adds `aiofiles` for non-blocking IO when serving files larger than the threshold.
 
 ### Pre-compressing assets
 
@@ -99,7 +102,7 @@ All options can be passed as keyword arguments to `WhiteSnout`:
 | `charset` | `"utf-8"` | Charset for text-based content types |
 | `brotli` | `True` | Look for `.br` pre-compressed variants |
 | `gzip` | `True` | Look for `.gz` pre-compressed variants |
-| `max_cache_size` | `100` | Max entries in the native StatCache (stores `size, mtime_ns` tuples) |
+| `max_cache_size` | `64` | Max entries in the native StatCache (stores `size, mtime_ns` tuples) |
 | `cors` | `False` | Add `Access-Control-Allow-Origin: *` to all responses; handle OPTIONS preflight with 204 |
 | `security_headers` | `True` | Add `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY` |
 | `error_responses` | `{404: b"Not Found", 405: b"Method Not Allowed", 416: b"Range Not Satisfiable"}` | Customize response bodies for error status codes; `{}` for empty bodies |
@@ -269,7 +272,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## Benchmark
 
-Results measured with `benchmarks/benchmark.py` — 500 requests (10 concurrent) against uvicorn with a mix of static files (265 KB across 34 items) and a JSON API endpoint.
+Results measured with `benchmarks/benchmark.py` (median of 3 runs) — 500 requests (10 concurrent) against uvicorn with a mix of static files (265 KB across 34 items) and a JSON API endpoint.
 
 - **RPS** — Requests per second (higher is better)
 - **P50** — Median latency in milliseconds (lower is better)
@@ -278,8 +281,8 @@ Results measured with `benchmarks/benchmark.py` — 500 requests (10 concurrent)
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
 |---|---|---|---|---|
-| **whitesnout** | **934** | 6.6 | 49.8 | 31.6 |
-| whitenoise | 846 | 6.1 | 72.5 | 28.3 |
+| **whitesnout** | **910** | 5.8 | 67.2 | 30.9 |
+| whitenoise | 899 | 5.6 | 78.4 | 28.3 |
 
 > **Platform**: Linux x86_64 · **Python**: 3.14.5 · **uvicorn**: 0.47.0
 

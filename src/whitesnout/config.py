@@ -109,7 +109,7 @@ class Config:
         self.max_cache_size = (
             max_cache_size
             if max_cache_size is not None
-            else env.get("max_cache_size", 100)
+            else env.get("max_cache_size", 64)
         )  # type: ignore[assignment]
         self.security_headers = (
             security_headers

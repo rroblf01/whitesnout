@@ -21,7 +21,7 @@ except ImportError:
 class LRUCache(Generic[K, V]):
     __slots__ = ("_impl",)
 
-    def __init__(self, maxsize: int = 100) -> None:
+    def __init__(self, maxsize: int = 64) -> None:
         if _RUST_AVAILABLE:
             self._impl: _PyLRUCache | _RustLRUCache = _RustLRUCache(maxsize)  # ty: ignore[call-non-callable]
         else:
@@ -40,7 +40,7 @@ class LRUCache(Generic[K, V]):
 class _PyLRUCache(Generic[K, V]):
     __slots__ = ("_maxsize", "_data")
 
-    def __init__(self, maxsize: int = 100) -> None:
+    def __init__(self, maxsize: int = 64) -> None:
         self._maxsize = maxsize
         self._data: OrderedDict[K, V] = OrderedDict()
 
@@ -63,7 +63,7 @@ class _PyLRUCache(Generic[K, V]):
 class StatCache:
     __slots__ = ("_impl",)
 
-    def __init__(self, maxsize: int = 100) -> None:
+    def __init__(self, maxsize: int = 64) -> None:
         if _RUST_AVAILABLE:
             self._impl: _PyStatCache | _RustStatCache = _RustStatCache(maxsize)  # ty: ignore[call-non-callable]
         else:
@@ -82,7 +82,7 @@ class StatCache:
 class _PyStatCache:
     __slots__ = ("_maxsize", "_data")
 
-    def __init__(self, maxsize: int = 100) -> None:
+    def __init__(self, maxsize: int = 64) -> None:
         self._maxsize = maxsize
         self._data: OrderedDict[str, tuple[int, int]] = OrderedDict()
 

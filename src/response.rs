@@ -1,5 +1,9 @@
 use pyo3::prelude::*;
 
+use crate::cache::StatCache;
+use crate::file_handler;
+use std::time::UNIX_EPOCH;
+
 #[pyfunction]
 pub fn compute_etag(size: i64, mtime_ns: i64) -> String {
     format!("\"{:x}-{:x}\"", mtime_ns, size)
@@ -253,9 +257,42 @@ use std::sync::Mutex;
 
 static HASHED_REGEX_CACHE: Mutex<Option<(String, regex::Regex)>> = Mutex::new(None);
 
+const DEFAULT_HASHED_PATTERN: &str = r"\.[a-f0-9]{8,}\.";
+
+// Hand matcher equivalent to `\.[a-f0-9]{8,}\.` — skip regex engine on hot path
+fn matches_default_hashed(filename: &str) -> bool {
+    let bytes = filename.as_bytes();
+    let n = bytes.len();
+    let mut i = 0;
+    while i < n {
+        if bytes[i] == b'.' {
+            let start = i + 1;
+            let mut j = start;
+            while j < n {
+                let b = bytes[j];
+                if b.is_ascii_digit() || (b'a'..=b'f').contains(&b) {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            if j - start >= 8 && j < n && bytes[j] == b'.' {
+                return true;
+            }
+            i = if j > start { j } else { i + 1 };
+        } else {
+            i += 1;
+        }
+    }
+    false
+}
+
 fn is_hashed_file_cached(filename: &str, pattern: &str) -> bool {
     if pattern.is_empty() {
         return false;
+    }
+    if pattern == DEFAULT_HASHED_PATTERN {
+        return matches_default_hashed(filename);
     }
     let mut cache = HASHED_REGEX_CACHE.lock().unwrap();
     if let Some((ref cached_pattern, ref re)) = *cache {
@@ -398,6 +435,101 @@ pub fn build_full_response(
     }
 
     (headers, status, final_length, range_spec, false)
+}
+
+#[pyfunction]
+#[pyo3(signature = (
+    file_path, stat_cache, accept_encoding,
+    allow_brotli, allow_gzip,
+    filename, charset,
+    cache_max_age, immutable_max_age, immutable_pattern,
+    security_enabled, cors_enabled,
+    range_header, method,
+    if_none_match, if_modified_since,
+))]
+#[allow(clippy::too_many_arguments)]
+pub fn build_full_response_v2(
+    file_path: &str,
+    stat_cache: &Bound<'_, StatCache>,
+    accept_encoding: &str,
+    allow_brotli: bool,
+    allow_gzip: bool,
+    filename: &str,
+    charset: &str,
+    cache_max_age: u64,
+    immutable_max_age: u64,
+    immutable_pattern: &str,
+    security_enabled: bool,
+    cors_enabled: bool,
+    range_header: Option<&str>,
+    method: &str,
+    if_none_match: Option<&str>,
+    if_modified_since: Option<&str>,
+) -> PyResult<(
+    String,
+    Vec<(Vec<u8>, Vec<u8>)>,
+    u16,
+    i64,
+    Option<(i64, i64)>,
+    bool,
+    Option<String>,
+)> {
+    let (serve_path, content_encoding) = match file_handler::find_compressed(
+        file_path,
+        accept_encoding,
+        allow_brotli,
+        allow_gzip,
+    ) {
+        Some((p, e)) => (p, Some(e)),
+        None => (file_path.to_string(), None),
+    };
+
+    let cached = stat_cache.borrow_mut().get(&serve_path);
+    let (file_size, mtime_ns) = match cached {
+        Some(t) => t,
+        None => {
+            let meta = std::fs::metadata(&serve_path).map_err(|e| {
+                pyo3::exceptions::PyOSError::new_err(format!("{}: {}", serve_path, e))
+            })?;
+            let sz = meta.len() as i64;
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|st| st.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos() as i64)
+                .unwrap_or(0);
+            stat_cache.borrow_mut().put(&serve_path, sz, mtime);
+            (sz, mtime)
+        }
+    };
+
+    let (headers, status, content_length, range_spec, is_304) = build_full_response(
+        file_size,
+        mtime_ns,
+        filename,
+        charset,
+        cache_max_age,
+        immutable_max_age,
+        immutable_pattern,
+        content_encoding.as_deref(),
+        security_enabled,
+        cors_enabled,
+        range_header,
+        method,
+        if_none_match,
+        if_modified_since,
+        file_path,
+    );
+
+    Ok((
+        serve_path,
+        headers,
+        status,
+        content_length,
+        range_spec,
+        is_304,
+        content_encoding,
+    ))
 }
 
 fn parse_range_inner(range_header: &str, file_size: i64) -> Option<(i64, i64)> {
