@@ -193,6 +193,15 @@ Results measured with `benchmarks/benchmark.py` — 500 requests (10 concurrent)
 - **P99** — 99th percentile latency in milliseconds (lower is better)
 - **RAM** — Resident set size in megabytes (lower is better)
 
+### v1.0.0 — Production readiness
+
+| Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
+|---|---|---|---|---|
+| **whitesnout** | 794 | 6.1 | 83.8 | 32.8 |
+| whitenoise | 829 | 6.3 | 91.0 | 31.6 |
+
+> **Platform**: Linux x86_64 · **Python**: 3.14.3 · **uvicorn**: 0.47.0
+
 ### v0.5.0 — CORS, Logging & Cache invalidation
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
@@ -231,7 +240,7 @@ $ uv run python benchmarks/benchmark.py
 ## ROADMAP
 
 ```
-v1.0.0 ─── Env vars + Async file IO (current)
+v1.0.0 ─── Env vars + Async file IO (done)
 v0.5.0 ─── CORS + Logging + Cache invalidation
 v0.4.0 ─── Rust Phase 2 + LRU O(1)
 v0.3.0 ─── Range Requests + Security headers + Accept-Encoding

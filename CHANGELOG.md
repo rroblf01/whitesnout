@@ -1,11 +1,19 @@
 # Changelog
 
-## 1.0.0-dev (unreleased)
+## 1.0.0 (2026-05-21)
 
-### Planned
+### Added
 
-- **Environment variables** — `WHITESNOUT_DIRECTORY`, `WHITESNOUT_CACHE_MAX_AGE`, etc.
-- **Async file IO** — Migrate `iter_chunks` to `anyio` or `aiofiles` to avoid blocking the event loop
+- **Environment variables** — all config options can be set via `WHITESNOUT_DIRECTORY`, `WHITESNOUT_CORS`, `WHITESNOUT_CACHE_MAX_AGE`, etc. Constructor kwargs take precedence over env vars
+- **Async file IO** — `iter_chunks` uses `aiofiles` for non-blocking file reads; falls back to sync `open()` when `aiofiles` is not installed
+- **Config tests** — 3 new tests covering env var override, kwarg precedence, and invalid value handling
+- **Benchmark** — whitesnout 794 RPS vs whitenoise 829 RPS with comparable RAM
+
+### Changed
+
+- **`aiofiles`** — added as a core dependency (not optional)
+- **Config** — all `__init__` params are now `None` by default, resolved via env → default chain
+- **Logging** — request logging now includes duration in milliseconds
 
 ## 0.5.0 (2026-05-21)
 
