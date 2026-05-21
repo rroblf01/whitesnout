@@ -39,6 +39,10 @@ skip = ["*-manylinux_i686", "*-musllinux_i686", "*-win32"]
 before-all = "curl -fsSL https://sh.rustup.rs | sh -s -- --default-toolchain stable -y --profile minimal 2>&1"
 environment = { PATH = "$HOME/.cargo/bin:$PATH" }
 
+[tool.cibuildwheel.macos]
+# Build both Intel and Apple Silicon from a single runner via cross-compilation
+archs = ["x86_64", "arm64"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
