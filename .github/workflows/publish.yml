@@ -26,6 +26,10 @@ jobs:
       # Linux uses Docker containers — Rust is installed via before-all in pyproject.toml.
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Add x86_64 target for macOS cross-compilation
+        if: matrix.os == 'macos-latest'
+        run: rustup target add x86_64-apple-darwin
+
       - uses: pypa/cibuildwheel@v2.23
         with:
           output-dir: dist/
