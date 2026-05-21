@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat as stat_module
 from pathlib import Path
 
@@ -32,5 +33,4 @@ def file_stat(path: Path) -> os.stat_result | None:
 
 
 def is_hashed_file(filename: str, pattern: str) -> bool:
-    import re
     return bool(re.search(pattern, filename))

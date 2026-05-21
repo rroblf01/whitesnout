@@ -1,9 +1,147 @@
 from __future__ import annotations
 
+import pytest
+
 from whitesnout import WhiteSnout
+from .conftest import ASGITestClient, read_test_file
 
 
-def test_import() -> None:
-    app = WhiteSnout()
-    assert app is not None
-    assert app.config.directory == "static"
+@pytest.fixture
+def client() -> ASGITestClient:
+    app = WhiteSnout(directory="tests/static")
+    return ASGITestClient(app)
+
+
+@pytest.mark.asyncio
+async def test_serves_existing_file(client: ASGITestClient) -> None:
+    resp = await client.get("/hello.txt")
+    assert resp["status"] == 200
+    assert resp["body"] == read_test_file("static/hello.txt")
+    assert resp["headers"][b"content-type"] == b"text/plain; charset=utf-8"
+    assert int(resp["headers"][b"content-length"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_returns_not_found(client: ASGITestClient) -> None:
+    resp = await client.get("/nonexistent.txt")
+    assert resp["status"] == 404
+
+
+@pytest.mark.asyncio
+async def test_returns_not_found_for_path_traversal(client: ASGITestClient) -> None:
+    resp = await client.get("/../../../etc/passwd")
+    assert resp["status"] == 404
+
+
+@pytest.mark.asyncio
+async def test_head_request_no_body(client: ASGITestClient) -> None:
+    resp = await client.get("/hello.txt", headers=[(b"HEAD", b"")])
+    resp = await client.get("/hello.txt")
+    # Reset - do HEAD via scope method if needed
+    scope = {
+        "type": "http",
+        "method": "HEAD",
+        "path": "/hello.txt",
+        "raw_path": b"/hello.txt",
+        "query_string": b"",
+        "headers": [],
+        "http_version": "1.1",
+        "scheme": "http",
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    body_chunks: list[bytes] = []
+    response_start = {}
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(event):
+        nonlocal response_start
+        if event["type"] == "http.response.start":
+            response_start = event
+        elif event["type"] == "http.response.body":
+            if event.get("body"):
+                body_chunks.append(event["body"])
+
+    app = WhiteSnout(directory="tests/static")
+    await app(scope, receive, send)
+    assert response_start["status"] == 200
+    assert b"content-length" in dict(response_start.get("headers", []))
+    assert b"".join(body_chunks) == b""
+
+
+@pytest.mark.asyncio
+async def test_method_not_allowed() -> None:
+    app = WhiteSnout(directory="tests/static")
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/hello.txt",
+        "raw_path": b"/hello.txt",
+        "query_string": b"",
+        "headers": [],
+        "http_version": "1.1",
+        "scheme": "http",
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    response_start = {}
+    body_chunks = []
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(event):
+        nonlocal response_start
+        if event["type"] == "http.response.start":
+            response_start = event
+        elif event["type"] == "http.response.body":
+            body_chunks.append(event.get("body", b""))
+
+    await app(scope, receive, send)
+    assert response_start["status"] == 405
+
+
+@pytest.mark.asyncio
+async def test_passes_to_inner_app_when_not_found() -> None:
+    inner_response = {"called": False}
+
+    async def inner_app(scope, receive, send):
+        inner_response["called"] = True
+        await send({
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", b"text/plain")],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": b"from inner",
+            "more_body": False,
+        })
+
+    app = WhiteSnout(inner_app, directory="tests/static")
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/nonexistent.txt",
+        "raw_path": b"/nonexistent.txt",
+        "query_string": b"",
+        "headers": [],
+        "http_version": "1.1",
+        "scheme": "http",
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    body_chunks = []
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(event):
+        if event["type"] == "http.response.body":
+            body_chunks.append(event.get("body", b""))
+
+    await app(scope, receive, send)
+    assert inner_response["called"]
+    assert b"from inner" in b"".join(body_chunks)
