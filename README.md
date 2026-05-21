@@ -186,4 +186,4 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) for the full text.
