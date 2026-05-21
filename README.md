@@ -1,6 +1,6 @@
 # whitesnout
 
-**WhiteSnout** is an ASGI static file server for Python — like Whitenoise, but built for ASGI frameworks (FastAPI, Starlette, Django, etc.). It serves static files with minimal memory overhead, streaming content in chunks and leveraging pre-compressed assets.
+**WhiteSnout** is an ASGI static file server for Python — like Whitenoise, but built for ASGI frameworks (FastAPI, Starlette, Django, etc.). It serves static files with minimal memory overhead, streaming content in chunks and leveraging pre-compressed assets. A Rust extension (PyO3) accelerates the hot path transparently.
 
 ---
 
@@ -56,7 +56,30 @@ application = WhiteSnout(django_app, directory="static")
 $ uv add whitesnout
 ```
 
-Requires Python ≥ 3.14.
+Or with pip:
+
+```console
+$ pip install whitesnout
+```
+
+Requires Python **≥ 3.10**.
+
+The compress CLI needs Brotli:
+
+```console
+$ uv add 'whitesnout[compress]'
+```
+
+### Pre-compressing assets
+
+Generate `.gz` and `.br` variants for all files in a directory:
+
+```console
+$ python -m whitesnout compress static/
+Compressed: 42 gzip, 42 brotli
+```
+
+This is a build-time step — at runtime WhiteSnout serves the pre-compressed files directly with zero CPU overhead.
 
 ---
 
@@ -102,24 +125,62 @@ app = WhiteSnout(
 - **Path traversal protection** — resolved paths are verified to stay within the root directory
 - **Low overhead** — LRU cache for file stats reduces `stat()` syscalls; no dependency bloat
 - **MIME types** — content-type detection for 30+ file extensions, with automatic charset for text types
+- **Compress CLI** — `python -m whitesnout compress <directory>` generates pre-compressed `.gz` and `.br` files as a build step
+- **Rust extension** — `whitesnout._rs` speeds up the LRU cache transparently; pure Python fallback when unavailable
+- **Multi-platform wheels** — pre-built for Linux (x86_64, arm64), macOS (x86_64, arm64), and Windows (amd64)
 
 ---
 
 ## Architecture
 
-The library is structured for a future Rust rewrite of the hot path:
-
 ```
-src/whitesnout/
-├── main.py          # WhiteSnout ASGI middleware (thin integration layer)
-├── file_handler.py  # Path resolution, compression negotiation (pure logic)
-├── response.py      # Header building, chunked streaming, 304 handling
-├── config.py        # Configuration dataclass
-├── cache.py         # Generic LRU cache
-└── utils.py         # MIME type table, helpers
+whitesnout/
+├── main.py              # ASGI middleware (always Python)
+├── file_handler.py      # Path resolution, compression negotiation
+├── response.py          # Header building, chunked streaming, 304
+├── cache.py             # LRU cache (Python → falls back to Rust)
+├── config.py            # Configuration dataclass
+├── utils.py             # MIME type table, helpers
+├── cli.py               # CLI entry point
+├── compress.py          # Compression logic
+└── py.typed
+
+whitesnout._rs           # Compiled Rust extension (PyO3)
+├── LRUCache             # Rust implementation, auto fallback to Python
 ```
 
-The core logic in `file_handler.py` and `response.py` consists of pure functions with no side effects, making them straightforward to port to Rust while keeping the Python ASGI integration layer thin.
+The core logic consists of pure functions designed for gradual migration to Rust. The ASGI integration layer (`main.py`) stays in Python forever — it is the thin touchpoint with the ASGI protocol.
+
+---
+
+## Development
+
+### With Docker (recommended)
+
+```console
+$ make build     # Build Docker image + compile Rust + install deps
+$ make test      # Run test suite inside container
+$ make shell     # Open interactive shell in container
+$ make release   # Build release wheel
+```
+
+Requires Docker. The image is based on `rust:slim-trixie` with Python, uv, and maturin pre-installed.
+
+### Without Docker
+
+```console
+$ uv sync --dev               # Install Python deps + build Rust extension
+$ uv run pytest -v            # Run tests
+$ maturin develop --uv        # Rebuild Rust extension only
+```
+
+Requires Rust (via rustup) and maturin (`cargo install maturin`).
+
+---
+
+## CHANGELOG
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ---
 
