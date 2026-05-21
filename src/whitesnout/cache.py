@@ -21,18 +21,18 @@ class LRUCache(Generic[K, V]):
 
     def __init__(self, maxsize: int = 100) -> None:
         if _RUST_AVAILABLE:
-            self._impl: _PyLRUCache | _RustLRUCache = _RustLRUCache(maxsize)
+            self._impl: _PyLRUCache | _RustLRUCache = _RustLRUCache(maxsize)  # ty: ignore[call-non-callable]
         else:
             self._impl = _PyLRUCache(maxsize)
 
     def get(self, key: K) -> V | None:
-        return self._impl.get(key)  # type: ignore[return-value]
+        return self._impl.get(key)  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
 
     def put(self, key: K, value: V) -> None:
-        self._impl.put(key, value)  # type: ignore[arg-type]
+        self._impl.put(key, value)  # type: ignore[arg-type]  # ty: ignore[unresolved-attribute]
 
     def clear(self) -> None:
-        self._impl.clear()
+        self._impl.clear()  # ty: ignore[unresolved-attribute]
 
 
 class _PyLRUCache(Generic[K, V]):

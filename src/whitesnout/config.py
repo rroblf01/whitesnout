@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import re
+from whitesnout.types import ASGIApp
 
 
 class Config:
@@ -22,7 +22,7 @@ class Config:
         self,
         *,
         directory: str = "static",
-        app: object | None = None,
+        app: ASGIApp | None = None,
         index_file: str = "index.html",
         cache_max_age: int = 3600,
         immutable_max_age: int = 31536000,
@@ -38,7 +38,7 @@ class Config:
         self.index_file = index_file
         self.cache_max_age = cache_max_age
         self.immutable_max_age = immutable_max_age
-        self.immutable_pattern = re.compile(immutable_pattern)
+        self.immutable_pattern = immutable_pattern
         self.chunk_size = chunk_size
         self.charset = charset
         self.brotli = brotli

@@ -12,7 +12,9 @@ def sanitize_path(root: str, requested_path: str) -> Path | None:
         full = (root_resolved / requested_path.lstrip("/")).resolve()
     except (ValueError, RuntimeError):
         return None
-    if not str(full).startswith(str(root_resolved) + os.sep) and str(full) != str(root_resolved):
+    if not str(full).startswith(str(root_resolved) + os.sep) and str(full) != str(
+        root_resolved
+    ):
         return None
     if not full.exists():
         return None
@@ -31,7 +33,9 @@ def resolve_directory(root: str, requested_path: str) -> Path | None:
         full = (root_resolved / requested_path.lstrip("/")).resolve()
     except (ValueError, RuntimeError):
         return None
-    if not str(full).startswith(str(root_resolved) + os.sep) and str(full) != str(root_resolved):
+    if not str(full).startswith(str(root_resolved) + os.sep) and str(full) != str(
+        root_resolved
+    ):
         return None
     if not full.is_dir():
         return None

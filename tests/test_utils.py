@@ -81,6 +81,7 @@ async def test_brotli_preferred_over_gzip() -> None:
 
 def test_is_hashed_file() -> None:
     from whitesnout.file_handler import is_hashed_file
+
     assert is_hashed_file("styles.a1b2c3d4.css", r"\.[a-f0-9]{8,}\.")
     assert is_hashed_file("app.12345678.js", r"\.[a-f0-9]{8,}\.")
     assert not is_hashed_file("styles.css", r"\.[a-f0-9]{8,}\.")
@@ -90,6 +91,7 @@ def test_is_hashed_file() -> None:
 def test_build_cache_control() -> None:
     from whitesnout.config import Config
     from whitesnout.response import build_cache_control
+
     config = Config()
     hashed_cc = build_cache_control(config, "styles.a1b2c3d4.css")
     assert "immutable" in hashed_cc

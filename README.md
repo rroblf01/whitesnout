@@ -184,6 +184,47 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ---
 
+## ROADMAP
+
+```
+v0.1.0 ─── Published (current)
+   │
+   ├─ v0.2.0  Ruff + Ty + type safety
+   ├─ v0.3.0  Range Requests + Security headers + Accept-Encoding quality values
+   ├─ v0.4.0  Rust Phase 2 (utils, file_handler) + LRU cache O(1)
+   ├─ v0.5.0  CORS + Logging + Cache invalidation
+   └─ v1.0.0  Env vars + Async file IO + Benchmarks
+```
+
+### v0.2.0 — Ruff + Ty
+- Add `ruff` (lint + format) and `ty` (type checker) for code validation
+- Fix all lint/type errors; pass both in CI
+
+### v0.3.0 — Range Requests & Security
+- **Range Requests**: Parse `Range:` header, respond with `206 Partial Content` + `Content-Range`. Required for video, audio, and PDF seeking
+- **Security headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` by default
+- **Accept-Encoding quality values**: Parse `Accept-Encoding: gzip, br;q=0.1` correctly instead of naive substring matching
+- **Respect brotli/gzip flags**: `find_compressed` must skip `.br` when `brotli=False`
+
+### v0.4.0 — Rust Phase 2 + LRU O(1)
+- Port `utils.py` (MIME types) → `src/utils.rs`
+- Port `file_handler.py` (find_compressed, is_hashed_file) → `src/file_handler.rs`
+- Replace `Vec`-based Rust LRU with a `LinkedHashMap` for O(1) operations
+- Add Rust unit tests (`#[cfg(test)]`)
+- Expand MIME type table from 30 → 100+
+
+### v0.5.0 — CORS, Logging & Cache invalidation
+- **CORS opt-in**: Config `cors=True` → add `Access-Control-Allow-Origin: *`
+- **Logging**: Basic request logging (method, path, status, bytes, duration)
+- **Cache invalidation**: Programmatic `invalidate()` method to purge the LRU cache
+
+### v1.0.0 — Production readiness
+- **Environment variables**: `WHITESNOUT_DIRECTORY`, `WHITESNOUT_CACHE_MAX_AGE`, etc.
+- **Async file IO**: Migrate `iter_chunks` to `anyio` or `aiofiles` to avoid blocking the event loop
+- **Benchmarks**: Compare against Whitenoise and raw ASGI serving
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for the full text.

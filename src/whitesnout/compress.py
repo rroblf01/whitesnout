@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import gzip
-import os
 from pathlib import Path
 
 
@@ -13,10 +12,13 @@ def compress_directory(root: str, force: bool = False) -> None:
 
     try:
         import brotli  # noqa: F401
+
         has_brotli = True
     except ImportError:
         has_brotli = False
-        print("Warning: brotli not installed. Install with: uv add whitesnout[compress]")
+        print(
+            "Warning: brotli not installed. Install with: uv add whitesnout[compress]"
+        )
 
     count_gz = 0
     count_br = 0
@@ -42,6 +44,7 @@ def compress_directory(root: str, force: bool = False) -> None:
 
 def _compress_gzip(path: Path, force: bool) -> int:
     import io
+
     gz_path = path.with_suffix(path.suffix + ".gz")
     if not _needs_update(path, gz_path, force):
         return 0

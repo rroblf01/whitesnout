@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import email.utils
+import os
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import AsyncGenerator
 
 from whitesnout.config import Config
 
@@ -37,16 +38,20 @@ async def send_response(
     headers: list[tuple[bytes, bytes]],
     body: bytes = b"",
 ) -> None:
-    await send({
-        "type": "http.response.start",
-        "status": status,
-        "headers": headers,
-    })
-    await send({
-        "type": "http.response.body",
-        "body": body,
-        "more_body": False,
-    })
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status,
+            "headers": headers,
+        }
+    )
+    await send(
+        {
+            "type": "http.response.body",
+            "body": body,
+            "more_body": False,
+        }
+    )
 
 
 def not_found_headers() -> list[tuple[bytes, bytes]]:
@@ -74,6 +79,7 @@ def format_last_modified(st: os.stat_result) -> str:
 
 def build_cache_control(config: Config, filename: str) -> str:
     from whitesnout.file_handler import is_hashed_file
+
     if is_hashed_file(filename, config.immutable_pattern):
         return f"public, immutable, max-age={config.immutable_max_age}"
     return f"public, max-age={config.cache_max_age}"
@@ -92,9 +98,10 @@ def check_304(
         elif name.lower() == b"if-modified-since":
             modified_since = value.decode()
 
-    if etag_match is not None:
-        if etag_match == "*" or etag in (etag_match, etag_match.strip('"')):
-            return True
+    if etag_match is not None and (
+        etag_match == "*" or etag in (etag_match, etag_match.strip('"'))
+    ):
+        return True
 
     if modified_since is not None:
         try:

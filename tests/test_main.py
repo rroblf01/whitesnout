@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from whitesnout import WhiteSnout
+
 from .conftest import ASGITestClient, read_test_file
 
 
@@ -35,8 +36,7 @@ async def test_returns_not_found_for_path_traversal(client: ASGITestClient) -> N
 
 @pytest.mark.asyncio
 async def test_head_request_no_body(client: ASGITestClient) -> None:
-    resp = await client.get("/hello.txt", headers=[(b"HEAD", b"")])
-    resp = await client.get("/hello.txt")
+    await client.get("/hello.txt", headers=[(b"HEAD", b"")])
     # Reset - do HEAD via scope method if needed
     scope = {
         "type": "http",
@@ -60,9 +60,8 @@ async def test_head_request_no_body(client: ASGITestClient) -> None:
         nonlocal response_start
         if event["type"] == "http.response.start":
             response_start = event
-        elif event["type"] == "http.response.body":
-            if event.get("body"):
-                body_chunks.append(event["body"])
+        elif event["type"] == "http.response.body" and event.get("body"):
+            body_chunks.append(event["body"])
 
     app = WhiteSnout(directory="tests/static")
     await app(scope, receive, send)
@@ -262,16 +261,20 @@ async def test_passes_to_inner_app_when_not_found() -> None:
 
     async def inner_app(scope, receive, send):
         inner_response["called"] = True
-        await send({
-            "type": "http.response.start",
-            "status": 200,
-            "headers": [(b"content-type", b"text/plain")],
-        })
-        await send({
-            "type": "http.response.body",
-            "body": b"from inner",
-            "more_body": False,
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/plain")],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": b"from inner",
+                "more_body": False,
+            }
+        )
 
     app = WhiteSnout(inner_app, directory="tests/static")
     scope = {

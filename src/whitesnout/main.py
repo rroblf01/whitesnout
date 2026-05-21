@@ -4,7 +4,12 @@ import os
 
 from whitesnout.cache import LRUCache
 from whitesnout.config import Config
-from whitesnout.file_handler import find_compressed, resolve_directory, resolve_index, sanitize_path
+from whitesnout.file_handler import (
+    find_compressed,
+    resolve_directory,
+    resolve_index,
+    sanitize_path,
+)
 from whitesnout.response import (
     build_cache_control,
     build_headers,
@@ -16,6 +21,7 @@ from whitesnout.response import (
     redirect_headers,
     send_response,
 )
+from whitesnout.types import ASGIApp, ASGIReceive, ASGISend
 from whitesnout.utils import guess_content_type
 
 
@@ -31,7 +37,7 @@ class WhiteSnout:
 
     def __init__(
         self,
-        app: object | None = None,
+        app: ASGIApp | None = None,
         *,
         directory: str = "static",
         index_file: str = "index.html",
@@ -57,13 +63,15 @@ class WhiteSnout:
             gzip=gzip,
             max_cache_size=max_cache_size,
         )
-        self._stat_cache: LRUCache[str, os.stat_result] = LRUCache(maxsize=max_cache_size)
+        self._stat_cache: LRUCache[str, os.stat_result] = LRUCache(
+            maxsize=max_cache_size
+        )
 
     async def __call__(
         self,
         scope: dict,
-        receive: object,
-        send: object,
+        receive: ASGIReceive,
+        send: ASGISend,
     ) -> None:
         if scope["type"] != "http":
             app = self.config.app
@@ -76,6 +84,7 @@ class WhiteSnout:
                 await self.config.app(scope, receive, send)
             else:
                 from whitesnout.response import method_not_allowed_headers
+
                 await send_response(
                     send,
                     405,
@@ -148,11 +157,15 @@ class WhiteSnout:
         cache_control = build_cache_control(self.config, file_path.name)
 
         if check_304(scope.get("headers", []), etag, last_modified):
-            await send_response(send, 304, [
-                (b"etag", etag.encode()),
-                (b"last-modified", last_modified.encode()),
-                (b"cache-control", cache_control.encode()),
-            ])
+            await send_response(
+                send,
+                304,
+                [
+                    (b"etag", etag.encode()),
+                    (b"last-modified", last_modified.encode()),
+                    (b"cache-control", cache_control.encode()),
+                ],
+            )
             return
 
         extra_headers: list[tuple[bytes, bytes]] = [
@@ -175,20 +188,26 @@ class WhiteSnout:
             await send_response(send, 200, headers)
             return
 
-        await send({
-            "type": "http.response.start",
-            "status": 200,
-            "headers": headers,
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": headers,
+            }
+        )
 
         async for chunk in iter_chunks(serve_path, self.config.chunk_size):
-            await send({
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": chunk,
+                    "more_body": True,
+                }
+            )
+        await send(
+            {
                 "type": "http.response.body",
-                "body": chunk,
-                "more_body": True,
-            })
-        await send({
-            "type": "http.response.body",
-            "body": b"",
-            "more_body": False,
-        })
+                "body": b"",
+                "more_body": False,
+            }
+        )

@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import json
-from collections.abc import AsyncIterator
+from whitesnout.types import ASGIApp
 
 
 class ASGITestClient:
-    def __init__(self, app: object) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
-    async def get(self, path: str, headers: list[tuple[bytes, bytes]] | None = None) -> dict:
+    async def get(
+        self, path: str, headers: list[tuple[bytes, bytes]] | None = None
+    ) -> dict:
         scope: dict = {
             "type": "http",
             "method": "GET",
@@ -48,4 +49,5 @@ class ASGITestClient:
 
 def read_test_file(path: str) -> bytes:
     from pathlib import Path
+
     return (Path(__file__).parent / path).read_bytes()
