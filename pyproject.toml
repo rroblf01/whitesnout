@@ -12,9 +12,17 @@ dependencies = []
 [project.optional-dependencies]
 compress = ["brotli"]
 
+[project.scripts]
+whitesnout = "whitesnout.cli:main"
+
 [build-system]
-requires = ["uv_build>=0.11.15,<0.12.0"]
-build-backend = "uv_build"
+requires = ["maturin>=1.8,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+module-name = "whitesnout._rs"
+python-source = "src"
+compatibility = "linux"
 
 [dependency-groups]
 dev = [

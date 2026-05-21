@@ -6,8 +6,36 @@ from typing import Generic, TypeVar
 K = TypeVar("K")
 V = TypeVar("V")
 
+_RUST_AVAILABLE = False
+
+try:
+    from whitesnout._rs import LRUCache as _RustLRUCache  # type: ignore[no-redef]
+
+    _RUST_AVAILABLE = True
+except ImportError:
+    _RustLRUCache = None  # type: ignore[assignment]
+
 
 class LRUCache(Generic[K, V]):
+    __slots__ = ("_impl",)
+
+    def __init__(self, maxsize: int = 100) -> None:
+        if _RUST_AVAILABLE:
+            self._impl: _PyLRUCache | _RustLRUCache = _RustLRUCache(maxsize)
+        else:
+            self._impl = _PyLRUCache(maxsize)
+
+    def get(self, key: K) -> V | None:
+        return self._impl.get(key)  # type: ignore[return-value]
+
+    def put(self, key: K, value: V) -> None:
+        self._impl.put(key, value)  # type: ignore[arg-type]
+
+    def clear(self) -> None:
+        self._impl.clear()
+
+
+class _PyLRUCache(Generic[K, V]):
     __slots__ = ("_maxsize", "_data")
 
     def __init__(self, maxsize: int = 100) -> None:
