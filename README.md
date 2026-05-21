@@ -68,10 +68,29 @@ No required runtime dependencies. Optional extras:
 
 ```console
 $ uv add 'whitesnout[compress]'   # Brotli for the compress CLI
-$ uv add 'whitesnout[streaming]'  # aiofiles for true async streaming of large files
+$ uv add 'whitesnout[streaming]'  # aiofiles for non-blocking large-file streaming
 ```
 
-Small files (≤ `sync_threshold`, default 64 KB) are served via a single threaded read — no extra dependency needed. The `streaming` extra adds `aiofiles` for non-blocking IO when serving files larger than the threshold.
+### What `streaming` does
+
+Files ≤ `sync_threshold` (default **64 KB**) are read in a single `asyncio.to_thread` call — no extra dependency needed. Covers ~95% of typical static assets (HTML, CSS, JS bundles, icons, fonts).
+
+Files larger than `sync_threshold` are streamed in `chunk_size` (default 64 KB) pieces. Two backends are available:
+
+- **Without `streaming` extra** (default): chunks are read via blocking `open()` inside the running event-loop task. Fine for low-concurrency workloads, but a slow disk read can stall other requests on the same worker.
+- **With `streaming` extra**: chunks are read via `aiofiles`, which dispatches each read to a thread pool. Other requests keep progressing while the slow read happens.
+
+**Install `[streaming]` when:**
+
+- Serving files routinely larger than 64 KB (large JS bundles, videos, downloads, datasets)
+- Running on slow / network-mounted disks (NFS, SMB, EBS gp2)
+- High concurrency: many simultaneous large-file downloads
+
+**Skip it when:**
+
+- Only serving small assets (typical SPA build output, icons, fonts) — fast path already covers everything
+- Raising `sync_threshold` to fit your largest expected file (e.g. `sync_threshold=2_000_000` for ≤ 2 MB)
+- Memory-constrained environments — `aiofiles` adds ~500 KB resident
 
 ### Pre-compressing assets
 
@@ -272,7 +291,7 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ## Benchmark
 
-Results measured with `benchmarks/benchmark.py` (median of 3 runs) — 500 requests (10 concurrent) against uvicorn with a mix of static files (265 KB across 34 items) and a JSON API endpoint.
+Results measured with `benchmarks/benchmark.py` (median of 15 runs) — 500 requests (10 concurrent) against uvicorn with a mix of static files (265 KB across 34 items) and a JSON API endpoint.
 
 - **RPS** — Requests per second (higher is better)
 - **P50** — Median latency in milliseconds (lower is better)
@@ -281,10 +300,10 @@ Results measured with `benchmarks/benchmark.py` (median of 3 runs) — 500 reque
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
 |---|---|---|---|---|
-| **whitesnout** | **910** | 5.8 | 67.2 | 30.9 |
-| whitenoise | 899 | 5.6 | 78.4 | 28.3 |
+| **whitesnout** | **912** | 5.8 | 89.2 | 32.8 |
+| whitenoise | 907 | 5.8 | 81.3 | 31.5 |
 
-> **Platform**: Linux x86_64 · **Python**: 3.14.5 · **uvicorn**: 0.47.0
+> **Platform**: Linux x86_64 (bare metal) · **Python**: 3.14.5 · **uvicorn**: 0.47.0
 
 ### Running yourself
 
