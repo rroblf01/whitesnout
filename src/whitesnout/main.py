@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+
+from whitesnout.cache import LRUCache
 from whitesnout.config import Config
 from whitesnout.file_handler import find_compressed, resolve_directory, resolve_index, sanitize_path
 from whitesnout.response import (
@@ -24,7 +27,7 @@ def _get_accept_encoding(scope: dict) -> str:
 
 
 class WhiteSnout:
-    __slots__ = ("config",)
+    __slots__ = ("config", "_stat_cache")
 
     def __init__(
         self,
@@ -54,6 +57,7 @@ class WhiteSnout:
             gzip=gzip,
             max_cache_size=max_cache_size,
         )
+        self._stat_cache: LRUCache[str, os.stat_result] = LRUCache(maxsize=max_cache_size)
 
     async def __call__(
         self,
@@ -133,7 +137,11 @@ class WhiteSnout:
             serve_path = file_path
             content_encoding = None
 
-        st = serve_path.stat()
+        cache_key = str(serve_path)
+        st = self._stat_cache.get(cache_key)
+        if st is None:
+            st = serve_path.stat()
+            self._stat_cache.put(cache_key, st)
 
         etag = compute_etag(st)
         last_modified = format_last_modified(st)
