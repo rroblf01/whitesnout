@@ -1,0 +1,22 @@
+[project]
+name = "whitesnout"
+version = "0.1.0"
+description = "ASGI static file server — like Whitenoise, but for ASGI"
+readme = "README.md"
+authors = [
+    { name = "Ricardo Robles", email = "ricardo.r.f@hotmail.com" }
+]
+requires-python = ">=3.14"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.11.15,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
