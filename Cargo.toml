@@ -10,3 +10,4 @@ crate-type = ["cdylib"]
 [dependencies]
 pyo3 = { version = "0.23", features = ["extension-module", "abi3-py310"] }
 regex = "1"
+lru = "0.12"
