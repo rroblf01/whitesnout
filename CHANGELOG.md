@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0-dev (unreleased)
+
+### Planned
+
+- **Rust Phase 2** — port `utils.py` (MIME types) and `file_handler.py` (find_compressed, is_hashed_file) to Rust
+- **LRU cache O(1)** — replace `Vec`-based Rust LRU with a `LinkedHashMap` for constant-time operations
+- **Expanded MIME types** — from 30 to 100+ entries
+
 ## 0.3.0 (2026-05-21)
 
 ### Added
