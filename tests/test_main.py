@@ -118,6 +118,108 @@ async def test_content_type_html(client: ASGITestClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_etag_header_present(client: ASGITestClient) -> None:
+    resp = await client.get("/hello.txt")
+    assert resp["status"] == 200
+    etag = resp["headers"].get(b"etag")
+    assert etag is not None
+    assert etag.startswith(b'"')
+    assert etag.endswith(b'"')
+
+
+@pytest.mark.asyncio
+async def test_last_modified_header_present(client: ASGITestClient) -> None:
+    resp = await client.get("/hello.txt")
+    assert resp["status"] == 200
+    assert resp["headers"].get(b"last-modified") is not None
+
+
+@pytest.mark.asyncio
+async def test_cache_control_header_present(client: ASGITestClient) -> None:
+    resp = await client.get("/hello.txt")
+    assert resp["status"] == 200
+    cc = resp["headers"].get(b"cache-control")
+    assert cc is not None
+    assert b"public" in cc
+    assert b"max-age=3600" in cc
+
+
+@pytest.mark.asyncio
+async def test_304_not_modified_with_valid_etag(client: ASGITestClient) -> None:
+    resp = await client.get("/hello.txt")
+    etag = resp["headers"][b"etag"]
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/hello.txt",
+        "raw_path": b"/hello.txt",
+        "query_string": b"",
+        "headers": [(b"if-none-match", etag)],
+        "http_version": "1.1",
+        "scheme": "http",
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    response_start = {}
+    body_chunks = []
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(event):
+        nonlocal response_start
+        if event["type"] == "http.response.start":
+            response_start = event
+        elif event["type"] == "http.response.body":
+            body_chunks.append(event.get("body", b""))
+
+    app = WhiteSnout(directory="tests/static")
+    await app(scope, receive, send)
+    assert response_start["status"] == 304
+    assert b"".join(body_chunks) == b""
+
+
+@pytest.mark.asyncio
+async def test_304_not_modified_with_if_modified_since(client: ASGITestClient) -> None:
+    import calendar
+    import email.utils
+
+    resp = await client.get("/hello.txt")
+    last_modified = resp["headers"][b"last-modified"]
+
+    parsed = email.utils.parsedate(last_modified.decode())
+    future = calendar.timegm(parsed) + 3600
+    future_str = email.utils.formatdate(future, usegmt=True)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/hello.txt",
+        "raw_path": b"/hello.txt",
+        "query_string": b"",
+        "headers": [(b"if-modified-since", future_str.encode())],
+        "http_version": "1.1",
+        "scheme": "http",
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    response_start = {}
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(event):
+        nonlocal response_start
+        if event["type"] == "http.response.start":
+            response_start = event
+
+    app = WhiteSnout(directory="tests/static")
+    await app(scope, receive, send)
+    assert response_start["status"] == 304
+
+
+@pytest.mark.asyncio
 async def test_passes_to_inner_app_when_not_found() -> None:
     inner_response = {"called": False}
 

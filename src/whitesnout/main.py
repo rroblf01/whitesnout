@@ -3,7 +3,11 @@ from __future__ import annotations
 from whitesnout.config import Config
 from whitesnout.file_handler import sanitize_path
 from whitesnout.response import (
+    build_cache_control,
     build_headers,
+    check_304,
+    compute_etag,
+    format_last_modified,
     iter_chunks,
     not_found_headers,
     send_response,
@@ -84,13 +88,29 @@ class WhiteSnout:
             return
 
         st = file_path.stat()
-        extra_headers: list[tuple[bytes, bytes]] = []
+
+        etag = compute_etag(st)
+        last_modified = format_last_modified(st)
+        cache_control = build_cache_control(self.config, file_path.name)
+
+        if check_304(scope.get("headers", []), etag, last_modified):
+            await send_response(send, 304, [
+                (b"etag", etag.encode()),
+                (b"last-modified", last_modified.encode()),
+                (b"cache-control", cache_control.encode()),
+            ])
+            return
+
+        extra_headers: list[tuple[bytes, bytes]] = [
+            (b"etag", etag.encode()),
+            (b"last-modified", last_modified.encode()),
+            (b"cache-control", cache_control.encode()),
+        ]
 
         content_type = guess_content_type(str(file_path), self.config.charset)
         headers = build_headers(
             content_type=content_type,
             content_length=st.st_size,
-            status=200,
             extra=extra_headers,
         )
 
