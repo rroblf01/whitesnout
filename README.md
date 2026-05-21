@@ -184,6 +184,27 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 ---
 
+## Benchmark
+
+Results measured with `benchmarks/benchmark.py` — 500 requests (10 concurrent) against uvicorn with a mix of static files (265 KB across 34 items) and a JSON API endpoint.
+
+### v0.2.0
+
+| Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
+|---|---|---|---|---|
+| **whitesnout** | 966 | 5.8 | 119.2 | 31.8 |
+| whitenoise | 925 | 5.9 | 80.0 | 31.5 |
+
+> **Platform**: Linux x86_64 · **Python**: 3.14.3 · **uvicorn**: 0.47.0
+
+### Running yourself
+
+```console
+$ uv run python benchmarks/benchmark.py
+```
+
+---
+
 ## ROADMAP
 
 ```
