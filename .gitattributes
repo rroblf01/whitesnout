@@ -1,0 +1,10 @@
+# Force LF line endings on test static text files so pre-compressed
+# .gz/.br (generated on Linux) match on all platforms.
+tests/static/*.txt text eol=lf
+tests/static/*.html text eol=lf
+tests/static/*.css text eol=lf
+tests/static/*.js text eol=lf
+
+# Binary test files — never touch line endings
+tests/static/*.gz binary
+tests/static/*.br binary
