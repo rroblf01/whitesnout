@@ -188,6 +188,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 
 Results measured with `benchmarks/benchmark.py` — 500 requests (10 concurrent) against uvicorn with a mix of static files (265 KB across 34 items) and a JSON API endpoint.
 
+- **RPS** — Requests per second (higher is better)
+- **P50** — Median latency in milliseconds (lower is better)
+- **P99** — 99th percentile latency in milliseconds (lower is better)
+- **RAM** — Resident set size in megabytes (lower is better)
+
 ### v0.4.0 — Rust Phase 2 + O(1) LRU
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
