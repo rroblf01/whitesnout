@@ -99,7 +99,11 @@ All options can be passed as keyword arguments to `WhiteSnout`:
 | `charset` | `"utf-8"` | Charset for text-based content types |
 | `brotli` | `True` | Look for `.br` pre-compressed variants |
 | `gzip` | `True` | Look for `.gz` pre-compressed variants |
-| `max_cache_size` | `100` | Max entries in the LRU stat cache |
+| `max_cache_size` | `100` | Max entries in the native StatCache (stores `size, mtime_ns` tuples) |
+| `cors` | `False` | Add `Access-Control-Allow-Origin: *` to all responses; handle OPTIONS preflight with 204 |
+| `security_headers` | `True` | Add `X-Content-Type-Options: nosniff` and `X-Frame-Options: DENY` |
+| `error_responses` | `{404: b"Not Found", 405: b"Method Not Allowed", 416: b"Range Not Satisfiable"}` | Customize response bodies for error status codes; `{}` for empty bodies |
+| `log_level` | `"INFO"` | Logging level (`"DEBUG"`, `"INFO"`, `"WARNING"`, etc.); `None` disables logging entirely |
 
 ```python
 app = WhiteSnout(
@@ -126,8 +130,82 @@ app = WhiteSnout(
 - **Low overhead** — LRU cache for file stats reduces `stat()` syscalls; no dependency bloat
 - **MIME types** — content-type detection for 30+ file extensions, with automatic charset for text types
 - **Compress CLI** — `python -m whitesnout compress <directory>` generates pre-compressed `.gz` and `.br` files as a build step
-- **Rust extension** — `whitesnout._rs` speeds up the LRU cache transparently; pure Python fallback when unavailable
+- **Rust extension** — `whitesnout._rs` speeds up the LRU cache, stat cache, response building, header parsing, and date comparison transparently; pure Python fallback when unavailable
+- **Native StatCache** — stores `(size, mtime_ns)` as a Rust struct instead of Python `os.stat_result`, reducing GC pressure and memory overhead
+- **Configurable error bodies** — customize 404/405/416 responses, or set `{}` for empty bodies
+- **Silencable logging** — set `log_level=None` to disable all logging output
+- **Multiple directories** — serve from additional directories and individual files via `add_directory()` / `add_files()` with runtime registration and removal
 - **Multi-platform wheels** — pre-built for Linux (x86_64, arm64), macOS (x86_64, arm64), and Windows (amd64)
+
+---
+
+## Error responses
+
+By default, whitesnout returns `404 Not Found`, `405 Method Not Allowed`, and `416 Range Not Satisfiable` with matching text bodies. Customize them via `error_responses`:
+
+```python
+app = WhiteSnout(
+    directory="static",
+    error_responses={404: b"File not found"},
+)
+
+# Empty bodies for all errors
+app = WhiteSnout(directory="static", error_responses={})
+```
+
+When an inner ASGI app is configured, 404 and 405 errors are delegated to it instead.
+
+---
+
+## Logging
+
+Request logging is enabled by default at `INFO` level. Control it via `log_level`:
+
+```python
+# Default INFO logging (method, path, status, bytes, duration)
+app = WhiteSnout(directory="static")
+
+# Custom level
+app = WhiteSnout(directory="static", log_level="WARNING")
+
+# Completely silent
+app = WhiteSnout(directory="static", log_level=None)
+```
+
+---
+
+## Multiple directories & extra files
+
+Use `add_directory()` and `add_files()` to serve content from multiple locations:
+
+```python
+from fastapi import FastAPI
+from whitesnout import WhiteSnout
+
+app = FastAPI()
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
+
+ws = WhiteSnout(app, directory="frontend/dist")
+
+# Extra directories
+ws.add_directory("/media/uploads", "/mnt/storage/uploads")
+ws.add_directory("/avatars", "/var/avatars")
+
+# Individual files (take precedence over directories)
+ws.add_files({
+    "/.well-known/security.txt": "security/security.txt",
+    "/favicon.ico": "branding/favicon.ico",
+})
+
+# Dynamic registrations at runtime
+ws.remove_files("/favicon.ico")
+ws.remove_directory("/avatars")
+```
+
+Resolution order: `add_files()` → `add_directory()` → main `directory` → inner ASGI app.
 
 ---
 
@@ -146,7 +224,12 @@ whitesnout/
 └── py.typed
 
 whitesnout._rs           # Compiled Rust extension (PyO3)
-├── LRUCache             # Rust implementation, auto fallback to Python
+├── LRUCache             # Generic LRU cache (O(1) via `lru` crate)
+├── StatCache            # Native stat cache (stores size, mtime_ns without PyObject)
+├── response             # compute_etag, format_last_modified, build_headers,
+│                        # check_304, parse_range, build_content_range, etc.
+├── utils                # guess_content_type (100+ MIME types)
+└── file_handler         # find_compressed, parse_accept_encoding, is_hashed_file
 ```
 
 The core logic consists of pure functions designed for gradual migration to Rust. The ASGI integration layer (`main.py`) stays in Python forever — it is the thin touchpoint with the ASGI protocol.
@@ -193,6 +276,15 @@ Results measured with `benchmarks/benchmark.py` — 500 requests (10 concurrent)
 - **P99** — 99th percentile latency in milliseconds (lower is better)
 - **RAM** — Resident set size in megabytes (lower is better)
 
+### v2.0.0 — Rust Phase 3 + Multiple directories + Error customization
+
+| Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
+|---|---|---|---|---|
+| **whitesnout** | 886 | 6.3 | 88.5 | 32.9 |
+| whitenoise | 882 | 6.1 | 84.7 | 31.5 |
+
+> **Platform**: Linux x86_64 · **Python**: 3.14.3 · **uvicorn**: 0.47.0
+
 ### v1.0.0 — Production readiness
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
@@ -236,48 +328,6 @@ $ uv run python benchmarks/benchmark.py
 ```
 
 ---
-
-## ROADMAP
-
-```
-v1.0.0 ─── Env vars + Async file IO (done)
-v0.5.0 ─── CORS + Logging + Cache invalidation
-v0.4.0 ─── Rust Phase 2 + LRU O(1)
-v0.3.0 ─── Range Requests + Security headers + Accept-Encoding
-v0.2.0 ─── Ruff + Ty + type safety
-v0.1.0 ─── Published
-   │
-   ├─ v0.2.0  Ruff + Ty + type safety
-   ├─ v0.3.0  Range Requests + Security headers + Accept-Encoding quality values
-   ├─ v0.4.0  Rust Phase 2 (utils, file_handler) + LRU cache O(1)
-   ├─ v0.5.0  CORS + Logging + Cache invalidation
-   └─ v1.0.0  Env vars + Async file IO + Benchmarks
-
-### v0.2.0 — Ruff + Ty
-- Add `ruff` (lint + format) and `ty` (type checker) for code validation
-- Fix all lint/type errors; pass both in CI
-
-### v0.3.0 — Range Requests & Security
-- **Range Requests**: Parse `Range:` header, respond with `206 Partial Content` + `Content-Range`. Required for video, audio, and PDF seeking
-- **Security headers**: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` by default
-- **Accept-Encoding quality values**: Parse `Accept-Encoding: gzip, br;q=0.1` correctly instead of naive substring matching
-- **Respect brotli/gzip flags**: `find_compressed` must skip `.br` when `brotli=False`
-
-### v0.4.0 — Rust Phase 2 + LRU O(1)
-- Port `utils.py` (MIME types) → `src/utils.rs`
-- Port `file_handler.py` (find_compressed, is_hashed_file) → `src/file_handler.rs`
-- Replace `Vec`-based Rust LRU with `lru` crate (O(1) operations)
-- Expand MIME type table from 30 → 100+
-
-### v0.5.0 — CORS, Logging & Cache invalidation
-- **CORS opt-in**: Config `cors=True` → add `Access-Control-Allow-Origin: *`
-- **Logging**: Basic request logging (method, path, status, bytes, duration)
-- **Cache invalidation**: Programmatic `invalidate()` method to purge the LRU cache
-
-### v1.0.0 — Production readiness
-- **Environment variables**: `WHITESNOUT_DIRECTORY`, `WHITESNOUT_CACHE_MAX_AGE`, etc.
-- **Async file IO**: Migrate `iter_chunks` to `anyio` or `aiofiles` to avoid blocking the event loop
-- **Benchmarks**: Compare against Whitenoise and raw ASGI serving
 
 ---
 

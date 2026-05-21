@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.0.0 (2026-05-21) — Rust Phase 3 + Multiple directories + Error customization
+
+### Added
+
+- **Rust native StatCache** — `StatCache` in `src/cache.rs` stores `(st_size, st_mtime_ns)` as a native struct (no PyObject wrapping). Avoids Python object overhead per stat lookup. Pure Python fallback via `_PyStatCache` when the extension is unavailable
+- **Response module ported to Rust** — `compute_etag`, `format_last_modified`, `build_cache_control`, `security_headers`, `build_headers`, `parse_range`, `build_content_range`, and `check_304` all implemented in `src/response.rs` with automatic Python fallback
+- **Multiple directories** — `add_files(files: dict)` registers individual files at specific paths; `add_directory(prefix, directory)` serves an extra directory under a URL prefix; `remove_files(*paths)` and `remove_directory(prefix)` remove registrations
+- **Configurable error responses** — `error_responses: dict[int, bytes]` parameter allows customizing response bodies for 404, 405, 416, etc. Default keeps backward-compatible messages (`b"Not Found"`, `b"Method Not Allowed"`, `b"Range Not Satisfiable"`). Set to `{}` for empty bodies
+- **Silencable logging** — `log_level: str | None = "INFO"` parameter; pass `None` to disable all logging output
+- **New `error_headers()` function** — replaces `not_found_headers()` / `method_not_allowed_headers()` with a status-aware builder
+- **`chrono` crate** — added for RFC 2822 date parsing in the Rust `check_304` implementation
+
+### Changed
+
+- **`compute_etag()`** — now takes `(size: int, mtime_ns: int)` instead of `os.stat_result`
+- **`format_last_modified()`** — now takes `(mtime_ns: int)` instead of `os.stat_result`
+- **Stat cache** — stores raw `(int, int)` tuples instead of `os.stat_result` objects; lighter memory footprint
+- **Path resolution** — new `_resolve_requested_path()` and `_resolve_directory_path()` helpers handle priority: extra_files → extra_dirs → main directory → inner_app
+- **Logging** — no longer supports `WHITESNOUT_LOG_LEVEL` env var (use the `log_level` constructor kwarg instead); `log_level=None` completely disables logging
+- **Tests** — 24 new tests covering StatCache, error_responses, log_level, add_files/directory, and error_headers (total: 93)
+
+### Removed
+
+- **`not_found_headers()` and `method_not_allowed_headers()`** — replaced by `error_headers(status, body, error_responses)`
+- **`compute_etag()` / `format_last_modified()` stat-based overloads** — both now accept raw values instead of `os.stat_result`
+
 ## 1.0.0 (2026-05-21)
 
 ### Added

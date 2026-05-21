@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
+from pathlib import Path
 
-from whitesnout.cache import LRUCache
+from whitesnout.cache import StatCache
 from whitesnout.config import Config
 from whitesnout.file_handler import (
     find_compressed,
@@ -18,9 +18,9 @@ from whitesnout.response import (
     build_headers,
     check_304,
     compute_etag,
+    error_headers,
     format_last_modified,
     iter_chunks,
-    not_found_headers,
     parse_range,
     redirect_headers,
     security_headers,
@@ -43,8 +43,55 @@ def _cors_headers() -> list[tuple[bytes, bytes]]:
     return [(b"access-control-allow-origin", b"*")]
 
 
+def _resolve_requested_path(
+    config: Config,
+    path: str,
+    extra_files: dict[str, Path],
+    extra_dirs: list[tuple[str, Path]],
+) -> Path | None:
+    # 1. Check extra_files first
+    if path in extra_files:
+        fp = extra_files[path]
+        if fp.exists() and fp.is_file():
+            return fp
+
+    # 2. Check extra_dirs by prefix
+    for prefix, root in extra_dirs:
+        if path.startswith(prefix):
+            sub = path[len(prefix) :]
+            return sanitize_path(str(root), sub)
+
+    # 3. Check main directory
+    return sanitize_path(config.directory, path)
+
+
+def _resolve_directory_path(
+    config: Config,
+    path: str,
+    extra_dirs: list[tuple[str, Path]],
+) -> Path | None:
+    # Check main directory first
+    result = resolve_directory(config.directory, path)
+    if result is not None:
+        return result
+
+    # Check extra_dirs
+    for prefix, root in extra_dirs:
+        if path.startswith(prefix):
+            sub = path[len(prefix) :]
+            return resolve_directory(str(root), sub)
+
+    return None
+
+
 class WhiteSnout:
-    __slots__ = ("config", "_stat_cache")
+    __slots__ = (
+        "config",
+        "_stat_cache",
+        "_extra_files",
+        "_extra_dirs",
+        "_log_handler",
+    )
 
     def __init__(
         self,
@@ -62,6 +109,8 @@ class WhiteSnout:
         max_cache_size: int | None = None,
         security_headers: bool | None = None,
         cors: bool | None = None,
+        error_responses: dict[int, bytes] | None = None,
+        log_level: str | None = "INFO",
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -77,10 +126,63 @@ class WhiteSnout:
             max_cache_size=max_cache_size,
             security_headers=security_headers,
             cors=cors,
+            error_responses=error_responses,
+            log_level=log_level,
         )
-        self._stat_cache: LRUCache[str, os.stat_result] = LRUCache(
+        self._stat_cache: StatCache = StatCache(
             maxsize=max_cache_size if max_cache_size is not None else 100
         )
+        self._extra_files: dict[str, Path] = {}
+        self._extra_dirs: list[tuple[str, Path]] = []
+        self._log_handler: logging.Handler | None = None
+        self._setup_logging()
+
+    def _setup_logging(self) -> None:
+        if self.config.log_level is None:
+            logger.handlers.clear()
+            logger.addHandler(logging.NullHandler())
+            logger.setLevel(logging.CRITICAL + 1)
+        else:
+            logger.handlers.clear()
+            handler = logging.StreamHandler()
+            handler.setFormatter(
+                logging.Formatter(
+                    "%(asctime)s %(levelname)s %(message)s",
+                    datefmt="%Y-%m-%d %H:%M:%S",
+                )
+            )
+            logger.addHandler(handler)
+            logger.setLevel(self.config.log_level.upper())
+
+    def add_files(self, files: dict[str, str | Path]) -> None:
+        """Register individual files to serve at specific paths.
+
+        Example:
+            app.add_files({
+                "/.well-known/security.txt": Path("security/security.txt"),
+                "/favicon.ico": "branding/favicon.ico",
+            })
+        """
+        for path, file_path in files.items():
+            self._extra_files[path] = Path(file_path)
+
+    def remove_files(self, *paths: str) -> None:
+        """Remove previously registered extra files."""
+        for path in paths:
+            self._extra_files.pop(path, None)
+
+    def add_directory(self, prefix: str, directory: str | Path) -> None:
+        """Serve an additional directory under a URL prefix.
+
+        Example:
+            app.add_directory("/media", "/mnt/media")
+            # GET /media/video.mp4 -> /mnt/media/video.mp4
+        """
+        self._extra_dirs.append((prefix, Path(directory)))
+
+    def remove_directory(self, prefix: str) -> None:
+        """Remove a previously registered extra directory."""
+        self._extra_dirs = [(p, d) for p, d in self._extra_dirs if p != prefix]
 
     def invalidate_cache(self) -> None:
         """Purge the stat cache."""
@@ -104,13 +206,12 @@ class WhiteSnout:
             if self.config.app is not None:
                 await self.config.app(scope, receive, send)
             else:
-                from whitesnout.response import method_not_allowed_headers
-
+                body = self.config.error_responses.get(405, b"")
                 await send_response(
                     send,
                     405,
-                    method_not_allowed_headers(),
-                    b"Method Not Allowed",
+                    error_headers(405, body, self.config.error_responses),
+                    body,
                 )
             return
 
@@ -119,11 +220,12 @@ class WhiteSnout:
             if self.config.cors:
                 extra = _cors_headers()
             else:
+                body = self.config.error_responses.get(405, b"")
                 await send_response(
                     send,
                     405,
-                    not_found_headers(),
-                    b"Method Not Allowed",
+                    error_headers(405, body, self.config.error_responses),
+                    body,
                 )
                 return
             headers = build_headers(
@@ -135,21 +237,24 @@ class WhiteSnout:
             return
 
         path = scope["path"].split("?")[0]
-        file_path = sanitize_path(self.config.directory, path)
+        file_path = _resolve_requested_path(
+            self.config, path, self._extra_files, self._extra_dirs
+        )
 
         if file_path is None:
-            dir_path = resolve_directory(self.config.directory, path)
+            dir_path = _resolve_directory_path(self.config, path, self._extra_dirs)
             if dir_path is not None:
                 if not path.endswith("/"):
                     redirect_to = path + "/"
                     qs = scope.get("query_string", b"")
                     if qs:
                         redirect_to += "?" + qs.decode()
+                    body = self.config.error_responses.get(301, b"")
                     await send_response(
                         send,
                         301,
                         redirect_headers(redirect_to),
-                        b"Moved Permanently",
+                        body,
                     )
                     return
                 index = resolve_index(dir_path, self.config.index_file)
@@ -159,22 +264,24 @@ class WhiteSnout:
                     if self.config.app is not None:
                         await self.config.app(scope, receive, send)
                     else:
+                        body = self.config.error_responses.get(404, b"")
                         await send_response(
                             send,
                             404,
-                            not_found_headers(),
-                            b"Not Found",
+                            error_headers(404, body, self.config.error_responses),
+                            body,
                         )
                     return
             else:
                 if self.config.app is not None:
                     await self.config.app(scope, receive, send)
                 else:
+                    body = self.config.error_responses.get(404, b"")
                     await send_response(
                         send,
                         404,
-                        not_found_headers(),
-                        b"Not Found",
+                        error_headers(404, body, self.config.error_responses),
+                        body,
                     )
                 return
 
@@ -193,14 +300,16 @@ class WhiteSnout:
             content_encoding = None
 
         cache_key = str(serve_path)
-        st = self._stat_cache.get(cache_key)
-        if st is None:
+        cached = self._stat_cache.get(cache_key)
+        if cached is not None:
+            file_size, mtime_ns = cached
+        else:
             st = serve_path.stat()
-            self._stat_cache.put(cache_key, st)
+            file_size, mtime_ns = st.st_size, st.st_mtime_ns
+            self._stat_cache.put(cache_key, file_size, mtime_ns)
 
-        file_size = st.st_size
-        etag = compute_etag(st)
-        last_modified = format_last_modified(st)
+        etag = compute_etag(file_size, mtime_ns)
+        last_modified = format_last_modified(mtime_ns)
         cache_control = build_cache_control(self.config, file_path.name)
 
         # Parse Range header
@@ -216,16 +325,17 @@ class WhiteSnout:
             if range_spec is None:
                 sec = security_headers(self.config.security_headers)
                 cors = _cors_headers() if self.config.cors else []
+                body = self.config.error_responses.get(416, b"")
                 await send_response(
                     send,
                     416,
                     [
                         (b"content-range", f"bytes */{file_size}".encode()),
-                        (b"content-type", b"text/plain; charset=utf-8"),
+                        *error_headers(416, body, self.config.error_responses),
                         *sec,
                         *cors,
                     ],
-                    b"Range Not Satisfiable",
+                    body,
                 )
                 return
 
@@ -315,12 +425,13 @@ class WhiteSnout:
             }
         )
 
-        elapsed = time.perf_counter() - t0
-        logger.info(
-            "%s %s %s %s %.1fms",
-            scope["method"],
-            path,
-            status,
-            content_length,
-            elapsed * 1000,
-        )
+        if self.config.log_level is not None:
+            elapsed = time.perf_counter() - t0
+            logger.info(
+                "%s %s %s %s %.1fms",
+                scope["method"],
+                path,
+                status,
+                content_length,
+                elapsed * 1000,
+            )

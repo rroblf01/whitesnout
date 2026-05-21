@@ -438,11 +438,7 @@ async def test_invalidate_cache() -> None:
     from whitesnout import WhiteSnout
 
     app = WhiteSnout(directory="tests/static")
-    # Stat a real file to get a valid stat_result
-    from pathlib import Path
-
-    st = Path("tests/static/hello.txt").stat()
-    app._stat_cache.put("test_key", st)
+    app._stat_cache.put("test_key", 14, 1234567890)
     assert app._stat_cache.get("test_key") is not None
     app.invalidate_cache()
     assert app._stat_cache.get("test_key") is None
@@ -552,3 +548,278 @@ async def client_get(
         "headers": dict(response_start.get("headers", [])),
         "body": b"".join(body_chunks),
     }
+
+
+# --- error_responses ---
+
+
+@pytest.mark.asyncio
+async def test_error_responses_custom_404_body() -> None:
+    app = WhiteSnout(
+        directory="tests/static",
+        error_responses={404: b"Custom not found"},
+    )
+    resp = await client_get(app, "/nonexistent.txt")
+    assert resp["status"] == 404
+    assert resp["body"] == b"Custom not found"
+
+
+@pytest.mark.asyncio
+async def test_error_responses_custom_405_body() -> None:
+    app = WhiteSnout(
+        directory="tests/static",
+        error_responses={405: b"Custom not allowed"},
+    )
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/hello.txt",
+        "raw_path": b"/hello.txt",
+        "query_string": b"",
+        "headers": [],
+        "http_version": "1.1",
+        "scheme": "http",
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    response_start = {}
+    body_chunks = []
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(event):
+        nonlocal response_start
+        if event["type"] == "http.response.start":
+            response_start = event
+        elif event["type"] == "http.response.body":
+            body_chunks.append(event.get("body", b""))
+
+    await app(scope, receive, send)
+    assert response_start["status"] == 405
+    assert b"".join(body_chunks) == b"Custom not allowed"
+
+
+@pytest.mark.asyncio
+async def test_error_responses_empty_error_bodies() -> None:
+    app = WhiteSnout(directory="tests/static", error_responses={})
+    resp = await client_get(app, "/nonexistent.txt")
+    assert resp["status"] == 404
+    assert resp["body"] == b""
+
+
+@pytest.mark.asyncio
+async def test_error_responses_custom_416_body() -> None:
+    app = WhiteSnout(directory="tests/static", error_responses={416: b"No way!"})
+    resp = await client_get(
+        app,
+        "/hello.txt",
+        extra_headers=[(b"range", b"bytes=100-110")],
+    )
+    assert resp["status"] == 416
+    assert resp["body"] == b"No way!"
+
+
+# --- log_level ---
+
+
+@pytest.mark.asyncio
+async def test_log_level_none_disables_logging(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    logger = logging.getLogger("whitesnout")
+    logger.setLevel(logging.INFO)
+
+    app = WhiteSnout(directory="tests/static", log_level=None)
+    resp = await client_get(app, "/hello.txt")
+    assert resp["status"] == 200
+    assert len(caplog.records) == 0
+
+
+@pytest.mark.asyncio
+async def test_log_level_info_enables_logging(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    logger = logging.getLogger("whitesnout")
+    logger.setLevel(logging.INFO)
+
+    app = WhiteSnout(directory="tests/static", log_level="INFO")
+    resp = await client_get(app, "/hello.txt")
+    assert resp["status"] == 200
+    assert len(caplog.records) >= 1
+    assert caplog.records[-1].name == "whitesnout"
+
+
+@pytest.mark.asyncio
+async def test_log_level_debug() -> None:
+    import logging
+
+    logger = logging.getLogger("whitesnout")
+    logger.setLevel(logging.DEBUG)
+
+    app = WhiteSnout(directory="tests/static", log_level="DEBUG")
+    resp = await client_get(app, "/hello.txt")
+    assert resp["status"] == 200
+
+
+# --- add_files / add_directory ---
+
+
+@pytest.mark.asyncio
+async def test_add_files_serves_extra_file() -> None:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w") as f:
+        f.write("extra content")
+        extra_path = f.name
+
+    try:
+        app = WhiteSnout(directory="tests/static")
+        app.add_files({"/extra/test.txt": extra_path})
+        resp = await client_get(app, "/extra/test.txt")
+        assert resp["status"] == 200
+        assert resp["body"] == b"extra content"
+    finally:
+        Path(extra_path).unlink()
+
+
+@pytest.mark.asyncio
+async def test_add_directory_serves_under_prefix() -> None:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        Path(tmpdir, "test.txt").write_text("from extra dir")
+        app = WhiteSnout(directory="tests/static")
+        app.add_directory("/media", tmpdir)
+        resp = await client_get(app, "/media/test.txt")
+        assert resp["status"] == 200
+        assert resp["body"] == b"from extra dir"
+
+
+@pytest.mark.asyncio
+async def test_add_directory_index() -> None:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        Path(tmpdir, "index.html").write_text("<h1>extra index</h1>")
+        app = WhiteSnout(directory="tests/static", index_file="index.html")
+        app.add_directory("/extra", tmpdir)
+        resp = await client_get(app, "/extra/")
+        assert resp["status"] == 200
+        assert resp["body"] == b"<h1>extra index</h1>"
+
+
+@pytest.mark.asyncio
+async def test_add_directory_redirect_to_trailing_slash() -> None:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        Path(tmpdir, "test.txt").write_text("content")
+        app = WhiteSnout(directory="tests/static")
+        app.add_directory("/media", tmpdir)
+        resp = await client_get(app, "/media")
+        assert resp["status"] == 301
+        assert resp["headers"][b"location"] == b"/media/"
+
+
+@pytest.mark.asyncio
+async def test_add_files_takes_precedence_over_directory() -> None:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w") as f:
+        f.write("override")
+        extra_path = f.name
+
+    try:
+        app = WhiteSnout(directory="tests/static")
+        app.add_files({"/hello.txt": extra_path})
+        resp = await client_get(app, "/hello.txt")
+        assert resp["status"] == 200
+        assert resp["body"] == b"override"
+    finally:
+        Path(extra_path).unlink()
+
+
+@pytest.mark.asyncio
+async def test_remove_files() -> None:
+    app = WhiteSnout(directory="tests/static")
+    app.add_files({"/custom.txt": "tests/static/hello.txt"})
+    app.remove_files("/custom.txt")
+    resp = await client_get(app, "/custom.txt")
+    assert resp["status"] == 404
+
+
+@pytest.mark.asyncio
+async def test_remove_directory() -> None:
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        Path(tmpdir, "test.txt").write_text("content")
+        app = WhiteSnout(directory="tests/static")
+        app.add_directory("/media", tmpdir)
+        app.remove_directory("/media")
+        resp = await client_get(app, "/media/test.txt")
+        assert resp["status"] == 404
+
+
+# --- error_headers ---
+
+
+def test_error_headers_301() -> None:
+    from whitesnout.response import error_headers
+
+    headers = error_headers(301, None, {})
+    assert len(headers) == 1
+    assert headers[0][0] == b"content-type"
+
+
+def test_error_headers_with_body() -> None:
+    from whitesnout.response import error_headers
+
+    headers = error_headers(404, b"Not Found", {})
+    assert len(headers) == 1
+    assert headers[0] == (b"content-type", b"text/plain; charset=utf-8")
+
+
+def test_error_headers_without_body() -> None:
+    from whitesnout.response import error_headers
+
+    headers = error_headers(404, None, {})
+    assert headers == []
+
+
+def test_error_headers_with_default_response() -> None:
+    from whitesnout.response import error_headers
+
+    headers = error_headers(404, None, {404: b"Default msg"})
+    assert len(headers) == 1
+    assert headers[0] == (b"content-type", b"text/plain; charset=utf-8")
+
+
+# --- compute_etag / format_last_modified raw ---
+
+
+def test_compute_etag_raw() -> None:
+    from whitesnout.response import compute_etag
+
+    etag = compute_etag(100, 200)
+    expected = f'"{200:x}-{100:x}"'
+    assert etag == expected
+    assert etag.startswith('"')
+    assert etag.endswith('"')
+    assert "-" in etag
+
+
+def test_format_last_modified_raw() -> None:
+    from whitesnout.response import format_last_modified
+
+    result = format_last_modified(1_700_000_000_000_000_000)
+    assert "GMT" in result

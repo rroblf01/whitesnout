@@ -1,11 +1,42 @@
 from __future__ import annotations
 
 import email.utils
-import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from whitesnout.config import Config
+
+_RUST_AVAILABLE = False
+
+try:
+    from whitesnout._rs import (
+        build_cache_control as _rs_build_cache_control,
+    )
+    from whitesnout._rs import (
+        build_content_range as _rs_build_content_range,
+    )
+    from whitesnout._rs import (
+        build_headers as _rs_build_headers,
+    )
+    from whitesnout._rs import (
+        check_304 as _rs_check_304,
+    )
+    from whitesnout._rs import (
+        compute_etag as _rs_compute_etag,
+    )
+    from whitesnout._rs import (
+        format_last_modified as _rs_format_last_modified,
+    )
+    from whitesnout._rs import (
+        parse_range as _rs_parse_range,
+    )
+    from whitesnout._rs import (
+        security_headers as _rs_security_headers,
+    )
+
+    _RUST_AVAILABLE = True
+except ImportError:
+    pass
 
 _AIO_AVAILABLE = False
 try:
@@ -59,6 +90,10 @@ def build_headers(
     content_length: int,
     extra: list[tuple[bytes, bytes]] | None = None,
 ) -> list[tuple[bytes, bytes]]:
+    if _RUST_AVAILABLE:
+        extra_str = [(k.decode(), v.decode()) for k, v in (extra or [])]
+        result = _rs_build_headers(content_type, content_length, extra_str)
+        return [(k.encode(), v.encode()) for k, v in result]
     headers: list[tuple[bytes, bytes]] = [
         (b"content-type", content_type.encode()),
         (b"content-length", str(content_length).encode()),
@@ -91,6 +126,9 @@ async def send_response(
 
 
 def security_headers(enabled: bool = True) -> list[tuple[bytes, bytes]]:
+    if _RUST_AVAILABLE:
+        result = _rs_security_headers(enabled)
+        return [(k.encode(), v.encode()) for k, v in result]
     if not enabled:
         return []
     return [
@@ -99,12 +137,16 @@ def security_headers(enabled: bool = True) -> list[tuple[bytes, bytes]]:
     ]
 
 
-def not_found_headers() -> list[tuple[bytes, bytes]]:
-    return [(b"content-type", b"text/plain; charset=utf-8")]
-
-
-def method_not_allowed_headers() -> list[tuple[bytes, bytes]]:
-    return [(b"content-type", b"text/plain; charset=utf-8")]
+def error_headers(
+    status: int,
+    body: bytes | None,
+    error_responses: dict[int, bytes],
+) -> list[tuple[bytes, bytes]]:
+    if status in (301,):
+        return [(b"content-type", b"text/plain; charset=utf-8")]
+    content = body if body is not None else error_responses.get(status, b"")
+    ct = b"text/plain; charset=utf-8" if content else b""
+    return [(b"content-type", ct)] if ct else []
 
 
 def redirect_headers(location: str) -> list[tuple[bytes, bytes]]:
@@ -115,10 +157,8 @@ def redirect_headers(location: str) -> list[tuple[bytes, bytes]]:
 
 
 def parse_range(range_header: str, file_size: int) -> tuple[int, int] | None:
-    """Parse ``Range: bytes=start-end`` header.
-
-    Returns (start, end) inclusive, or None if the range is invalid.
-    """
+    if _RUST_AVAILABLE:
+        return _rs_parse_range(range_header, file_size)
     if not range_header.startswith("bytes="):
         return None
     try:
@@ -127,7 +167,6 @@ def parse_range(range_header: str, file_size: int) -> tuple[int, int] | None:
             return None
         start_str, end_str = range_val.split("-", 1)
         if start_str == "":
-            # suffix range: -N → last N bytes
             n = int(end_str)
             return (max(0, file_size - n), file_size - 1) if n > 0 else None
         start = int(start_str)
@@ -140,21 +179,34 @@ def parse_range(range_header: str, file_size: int) -> tuple[int, int] | None:
 
 
 def build_content_range(start: int, end: int, total: int) -> bytes:
+    if _RUST_AVAILABLE:
+        return _rs_build_content_range(start, end, total).encode()
     return f"bytes {start}-{end}/{total}".encode()
 
 
-def compute_etag(st: os.stat_result) -> str:
-    return f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+def compute_etag(size: int, mtime_ns: int) -> str:
+    if _RUST_AVAILABLE:
+        return _rs_compute_etag(size, mtime_ns)
+    return f'"{mtime_ns:x}-{size:x}"'
 
 
-def format_last_modified(st: os.stat_result) -> str:
-    return email.utils.formatdate(st.st_mtime, usegmt=True)
+def format_last_modified(mtime_ns: int) -> str:
+    if _RUST_AVAILABLE:
+        return _rs_format_last_modified(mtime_ns)
+    return email.utils.formatdate(mtime_ns / 1_000_000_000, usegmt=True)
 
 
 def build_cache_control(config: Config, filename: str) -> str:
     from whitesnout.file_handler import is_hashed_file
 
-    if is_hashed_file(filename, config.immutable_pattern):
+    is_hashed = is_hashed_file(filename, config.immutable_pattern)
+    if _RUST_AVAILABLE:
+        return _rs_build_cache_control(
+            is_hashed,
+            config.cache_max_age,
+            config.immutable_max_age,
+        )
+    if is_hashed:
         return f"public, immutable, max-age={config.immutable_max_age}"
     return f"public, max-age={config.cache_max_age}"
 
@@ -164,6 +216,16 @@ def check_304(
     etag: str,
     last_modified: str,
 ) -> bool:
+    if _RUST_AVAILABLE:
+        etag_match = None
+        modified_since = None
+        for name, value in request_headers:
+            if name.lower() == b"if-none-match":
+                etag_match = value.decode()
+            elif name.lower() == b"if-modified-since":
+                modified_since = value.decode()
+        return _rs_check_304(etag_match, modified_since, etag, last_modified)
+
     etag_match = None
     modified_since = None
     for name, value in request_headers:

@@ -53,6 +53,8 @@ class Config:
         "max_cache_size",
         "security_headers",
         "cors",
+        "error_responses",
+        "log_level",
     )
 
     def __init__(
@@ -71,6 +73,8 @@ class Config:
         max_cache_size: int | None = None,
         security_headers: bool | None = None,
         cors: bool | None = None,
+        error_responses: dict[int, bytes] | None = None,
+        log_level: str | None = "INFO",
     ) -> None:
         env = _read_env()
 
@@ -115,3 +119,13 @@ class Config:
             else env.get("security_headers", True)
         )  # type: ignore[assignment]
         self.cors = cors if cors is not None else env.get("cors", False)  # type: ignore[assignment]
+        self.error_responses = (
+            error_responses
+            if error_responses is not None
+            else {
+                404: b"Not Found",
+                405: b"Method Not Allowed",
+                416: b"Range Not Satisfiable",
+            }
+        )  # type: ignore[assignment]
+        self.log_level = log_level  # type: ignore[assignment]
