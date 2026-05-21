@@ -118,3 +118,96 @@ pub fn check_304(
 
     false
 }
+
+#[pyfunction]
+#[pyo3(signature = (
+    content_type, content_length,
+    etag, last_modified, cache_control,
+    content_encoding=None, security_enabled=true, cors_enabled=false,
+    range_header=None, file_size=0,
+))]
+pub fn build_all_headers(
+    content_type: &str,
+    content_length: i64,
+    etag: &str,
+    last_modified: &str,
+    cache_control: &str,
+    content_encoding: Option<&str>,
+    security_enabled: bool,
+    cors_enabled: bool,
+    range_header: Option<&str>,
+    file_size: i64,
+) -> (Vec<(Vec<u8>, Vec<u8>)>, u16, i64, Option<(i64, i64)>) {
+    let mut headers: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(8);
+
+    headers.push((b"content-type".to_vec(), content_type.as_bytes().to_vec()));
+    headers.push((b"content-length".to_vec(), content_length.to_string().into_bytes()));
+    headers.push((b"etag".to_vec(), etag.as_bytes().to_vec()));
+    headers.push((b"last-modified".to_vec(), last_modified.as_bytes().to_vec()));
+    headers.push((b"cache-control".to_vec(), cache_control.as_bytes().to_vec()));
+
+    if security_enabled {
+        headers.push((b"x-content-type-options".to_vec(), b"nosniff".to_vec()));
+        headers.push((b"x-frame-options".to_vec(), b"DENY".to_vec()));
+    }
+
+    if cors_enabled {
+        headers.push((b"access-control-allow-origin".to_vec(), b"*".to_vec()));
+    }
+
+    if let Some(ce) = content_encoding {
+        headers.push((b"content-encoding".to_vec(), ce.as_bytes().to_vec()));
+    }
+
+    let mut status: u16 = 200;
+    let mut final_length = content_length;
+    let mut range_spec: Option<(i64, i64)> = None;
+
+    if let Some(rh) = range_header {
+        let parsed = parse_range_inner(rh, file_size);
+        if let Some((start, end)) = parsed {
+            status = 206;
+            final_length = end - start + 1;
+            headers.push((
+                b"content-range".to_vec(),
+                format!("bytes {}-{}/{}", start, end, file_size).into_bytes(),
+            ));
+            range_spec = Some((start, end));
+        }
+    }
+
+    (headers, status, final_length, range_spec)
+}
+
+fn parse_range_inner(range_header: &str, file_size: i64) -> Option<(i64, i64)> {
+    if !range_header.starts_with("bytes=") {
+        return None;
+    }
+    let range_val = range_header[6..].trim();
+    if !range_val.contains('-') {
+        return None;
+    }
+    let mut parts = range_val.splitn(2, '-');
+    let start_str = parts.next()?;
+    let end_str = parts.next()?;
+
+    if start_str.is_empty() {
+        let n: i64 = end_str.parse().ok()?;
+        if n <= 0 {
+            return None;
+        }
+        return Some((file_size - n, file_size - 1));
+    }
+
+    let start: i64 = start_str.parse().ok()?;
+    let end: i64 = if end_str.is_empty() {
+        file_size - 1
+    } else {
+        end_str.parse().ok()?
+    };
+
+    if start < 0 || start >= file_size || end < start {
+        return None;
+    }
+    Some((start, end.min(file_size - 1)))
+}

@@ -25,6 +25,7 @@ _ENV_PARSERS = {
     "max_cache_size": int,
     "security_headers": _bool,
     "cors": _bool,
+    "sync_threshold": int,
 }
 
 
@@ -55,6 +56,7 @@ class Config:
         "cors",
         "error_responses",
         "log_level",
+        "sync_threshold",
     )
 
     def __init__(
@@ -75,6 +77,7 @@ class Config:
         cors: bool | None = None,
         error_responses: dict[int, bytes] | None = None,
         log_level: str | None = "INFO",
+        sync_threshold: int | None = None,
     ) -> None:
         env = _read_env()
 
@@ -129,3 +132,8 @@ class Config:
             }
         )  # type: ignore[assignment]
         self.log_level = log_level  # type: ignore[assignment]
+        self.sync_threshold = (
+            sync_threshold
+            if sync_threshold is not None
+            else env.get("sync_threshold", 65536)
+        )  # type: ignore[assignment]

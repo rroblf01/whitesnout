@@ -63,8 +63,22 @@ pub fn find_compressed(
     None
 }
 
+use std::sync::Mutex;
+
+static REGEX_CACHE: Mutex<Option<(String, regex::Regex)>> = Mutex::new(None);
+
 #[pyfunction]
 pub fn is_hashed_file(filename: &str, pattern: &str) -> bool {
-    regex::Regex::new(pattern)
-        .map_or(false, |re| re.is_match(filename))
+    let mut cache = REGEX_CACHE.lock().unwrap();
+    if let Some((ref cached_pattern, ref re)) = *cache {
+        if cached_pattern == pattern {
+            return re.is_match(filename);
+        }
+    }
+    let Ok(re) = regex::Regex::new(pattern) else {
+        return false;
+    };
+    let result = re.is_match(filename);
+    *cache = Some((pattern.to_string(), re));
+    result
 }

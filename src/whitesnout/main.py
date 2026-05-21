@@ -13,8 +13,8 @@ from whitesnout.file_handler import (
     sanitize_path,
 )
 from whitesnout.response import (
+    build_all_headers,
     build_cache_control,
-    build_content_range,
     build_headers,
     check_304,
     compute_etag,
@@ -111,6 +111,7 @@ class WhiteSnout:
         cors: bool | None = None,
         error_responses: dict[int, bytes] | None = None,
         log_level: str | None = "INFO",
+        sync_threshold: int | None = None,
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -128,6 +129,7 @@ class WhiteSnout:
             cors=cors,
             error_responses=error_responses,
             log_level=log_level,
+            sync_threshold=sync_threshold,
         )
         self._stat_cache: StatCache = StatCache(
             maxsize=max_cache_size if max_cache_size is not None else 100
@@ -355,33 +357,18 @@ class WhiteSnout:
             )
             return
 
-        extra_headers: list[tuple[bytes, bytes]] = [
-            (b"etag", etag.encode()),
-            (b"last-modified", last_modified.encode()),
-            (b"cache-control", cache_control.encode()),
-        ]
-        extra_headers.extend(security_headers(self.config.security_headers))
-        if self.config.cors:
-            extra_headers.extend(_cors_headers())
-
-        if content_encoding:
-            extra_headers.append((b"content-encoding", content_encoding.encode()))
-
-        status = 206 if range_spec else 200
-        content_length = file_size
-
-        if range_spec:
-            rstart, rend = range_spec
-            content_length = rend - rstart + 1
-            extra_headers.append(
-                (b"content-range", build_content_range(rstart, rend, file_size))
-            )
-
         content_type = guess_content_type(str(file_path), self.config.charset)
-        headers = build_headers(
+        headers, status, content_length, range_spec = build_all_headers(
             content_type=content_type,
-            content_length=content_length,
-            extra=extra_headers,
+            content_length=file_size,
+            etag=etag,
+            last_modified=last_modified,
+            cache_control=cache_control,
+            content_encoding=content_encoding,
+            security_enabled=self.config.security_headers,
+            cors_enabled=self.config.cors,
+            range_header=range_header,
+            file_size=file_size,
         )
 
         if scope["method"] == "HEAD":
@@ -396,27 +383,21 @@ class WhiteSnout:
             }
         )
 
-        if range_spec:
-            rstart, rend = range_spec
-            async for chunk in iter_chunks(
-                serve_path, self.config.chunk_size, start=rstart, end=rend
-            ):
-                await send(
-                    {
-                        "type": "http.response.body",
-                        "body": chunk,
-                        "more_body": True,
-                    }
-                )
-        else:
-            async for chunk in iter_chunks(serve_path, self.config.chunk_size):
-                await send(
-                    {
-                        "type": "http.response.body",
-                        "body": chunk,
-                        "more_body": True,
-                    }
-                )
+        async for chunk in iter_chunks(
+            serve_path,
+            self.config.chunk_size,
+            start=range_spec[0] if range_spec else 0,
+            end=range_spec[1] if range_spec else None,
+            sync_threshold=self.config.sync_threshold,
+            file_size=file_size,
+        ):
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": chunk,
+                    "more_body": True,
+                }
+            )
         await send(
             {
                 "type": "http.response.body",

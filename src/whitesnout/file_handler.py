@@ -30,8 +30,6 @@ def sanitize_path(root: str, requested_path: str) -> Path | None:
         root_resolved
     ):
         return None
-    if not full.exists():
-        return None
     try:
         st = full.stat()
     except OSError:

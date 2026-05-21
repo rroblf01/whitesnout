@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import email.utils
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -9,6 +10,9 @@ from whitesnout.config import Config
 _RUST_AVAILABLE = False
 
 try:
+    from whitesnout._rs import (
+        build_all_headers as _rs_build_all_headers,
+    )
     from whitesnout._rs import (
         build_cache_control as _rs_build_cache_control,
     )
@@ -52,8 +56,23 @@ async def iter_chunks(
     chunk_size: int,
     start: int = 0,
     end: int | None = None,
+    sync_threshold: int = 0,
+    file_size: int | None = None,
 ) -> AsyncGenerator[bytes, None]:
     remaining = None if end is None else (end - start + 1)
+    total_size = remaining if remaining is not None else file_size
+    # Fast path: read small files in one shot via thread (avoids aiofiles per-chunk overhead)
+    if total_size is not None and total_size <= sync_threshold:
+        def _read() -> bytes:
+            with open(path, "rb") as f:
+                if start:
+                    f.seek(start)
+                if remaining is not None:
+                    return f.read(remaining)
+                return f.read()
+        yield await asyncio.to_thread(_read)
+        return
+
     if _AIO_AVAILABLE:
         async with aiofiles.open(path, "rb") as f:  # type: ignore[attr-defined]
             if start:
@@ -209,6 +228,65 @@ def build_cache_control(config: Config, filename: str) -> str:
     if is_hashed:
         return f"public, immutable, max-age={config.immutable_max_age}"
     return f"public, max-age={config.cache_max_age}"
+
+
+def build_all_headers(
+    content_type: str,
+    content_length: int,
+    etag: str,
+    last_modified: str,
+    cache_control: str,
+    content_encoding: str | None = None,
+    security_enabled: bool = True,
+    cors_enabled: bool = False,
+    range_header: str | None = None,
+    file_size: int = 0,
+) -> tuple[list[tuple[bytes, bytes]], int, int, tuple[int, int] | None]:
+    if _RUST_AVAILABLE:
+        raw = _rs_build_all_headers(
+            content_type,
+            content_length,
+            etag,
+            last_modified,
+            cache_control,
+            content_encoding,
+            security_enabled,
+            cors_enabled,
+            range_header,
+            file_size,
+        )
+        raw_headers, status, final_length, raw_range = raw
+        headers: list[tuple[bytes, bytes]] = [
+            (hname, hval) for hname, hval in raw_headers
+        ]
+        return (headers, status, final_length, raw_range)
+    headers: list[tuple[bytes, bytes]] = [
+        (b"content-type", content_type.encode()),
+        (b"content-length", str(content_length).encode()),
+        (b"etag", etag.encode()),
+        (b"last-modified", last_modified.encode()),
+        (b"cache-control", cache_control.encode()),
+    ]
+    if security_enabled:
+        headers.append((b"x-content-type-options", b"nosniff"))
+        headers.append((b"x-frame-options", b"DENY"))
+    if cors_enabled:
+        headers.append((b"access-control-allow-origin", b"*"))
+    if content_encoding:
+        headers.append((b"content-encoding", content_encoding.encode()))
+    status = 200
+    final_length = content_length
+    range_spec: tuple[int, int] | None = None
+    if range_header:
+        parsed = parse_range(range_header, file_size)
+        if parsed is not None:
+            rstart, rend = parsed
+            status = 206
+            final_length = rend - rstart + 1
+            cr = build_content_range(rstart, rend, file_size)
+            headers.append((b"content-range", cr))
+            range_spec = (rstart, rend)
+    return (headers, status, final_length, range_spec)
 
 
 def check_304(
