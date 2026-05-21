@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.0 (2026-05-21)
+
+### Added
+
+- **Code quality tooling** — `ruff` (lint + format) and `ty` (type checker) added as dev dependencies; both run in CI to enforce code quality
+- **ROADMAP** — added to README.md with planned versions up to v1.0.0
+- **ASGI type aliases** — `ASGIApp`, `ASGISend`, `ASGIReceive` defined in `types.py` with zero runtime dependencies
+
+### Changed
+
+- **Type safety** — all modules now pass `ty check` with full type annotations; `app` and `send` parameters use proper ASGI protocol types instead of `object`
+- **Config** — `immutable_pattern` stores a string instead of a compiled regex (simpler, same behavior)
+- **Rust fallback** — `cache.py` constructor narrowed with explicit `ty: ignore` comments for the conditional import path
+- **Formatting** — all source and test files formatted with `ruff format`
+
+### Removed
+
+- **mypy** — replaced by `ty` (Astral's type checker, same ecosystem as Ruff)
+
 ## 0.1.0 (2026-05-21)
 
 ### Added
