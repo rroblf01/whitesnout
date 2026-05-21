@@ -5,7 +5,37 @@ on:
     tags: ["v*"]
 
 jobs:
-  build:
+  wheels:
+    strategy:
+      matrix:
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-latest
+          - macos-13
+          - windows-latest
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: pypa/cibuildwheel@v2.23
+        with:
+          output-dir: dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: dist/*.whl
+
+  sdist:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,15 +48,18 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv build
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - run: uv build --sdist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: wheels-sdist
+          path: dist/*.tar.gz
 
   publish:
-    needs: [build]
+    needs: [wheels, sdist]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -36,7 +69,8 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: dist
+          pattern: wheels-*
+          merge-multiple: true
           path: dist/
 
       - uses: pypa/gh-action-pypi-publish@release/v1
