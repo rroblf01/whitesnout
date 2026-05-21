@@ -16,6 +16,7 @@ class Config:
         "brotli",
         "gzip",
         "max_cache_size",
+        "security_headers",
     )
 
     def __init__(
@@ -32,6 +33,7 @@ class Config:
         brotli: bool = True,
         gzip: bool = True,
         max_cache_size: int = 100,
+        security_headers: bool = True,
     ) -> None:
         self.directory = directory
         self.app = app
@@ -44,3 +46,4 @@ class Config:
         self.brotli = brotli
         self.gzip = gzip
         self.max_cache_size = max_cache_size
+        self.security_headers = security_headers

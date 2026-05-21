@@ -208,7 +208,8 @@ $ uv run python benchmarks/benchmark.py
 ## ROADMAP
 
 ```
-v0.2.0 ─── Ruff + Ty + type safety (current)
+v0.3.0 ─── Range Requests + Security headers + Accept-Encoding (current)
+v0.2.0 ─── Ruff + Ty + type safety
 v0.1.0 ─── Published
    │
    ├─ v0.2.0  Ruff + Ty + type safety

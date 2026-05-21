@@ -12,13 +12,16 @@ from whitesnout.file_handler import (
 )
 from whitesnout.response import (
     build_cache_control,
+    build_content_range,
     build_headers,
     check_304,
     compute_etag,
     format_last_modified,
     iter_chunks,
     not_found_headers,
+    parse_range,
     redirect_headers,
+    security_headers,
     send_response,
 )
 from whitesnout.types import ASGIApp, ASGIReceive, ASGISend
@@ -49,6 +52,7 @@ class WhiteSnout:
         brotli: bool = True,
         gzip: bool = True,
         max_cache_size: int = 100,
+        security_headers: bool = True,
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -62,6 +66,7 @@ class WhiteSnout:
             brotli=brotli,
             gzip=gzip,
             max_cache_size=max_cache_size,
+            security_headers=security_headers,
         )
         self._stat_cache: LRUCache[str, os.stat_result] = LRUCache(
             maxsize=max_cache_size
@@ -138,7 +143,12 @@ class WhiteSnout:
                 return
 
         accept_encoding = _get_accept_encoding(scope)
-        compressed = find_compressed(file_path, accept_encoding)
+        compressed = find_compressed(
+            file_path,
+            accept_encoding,
+            allow_brotli=self.config.brotli,
+            allow_gzip=self.config.gzip,
+        )
 
         if compressed is not None:
             serve_path, content_encoding = compressed
@@ -152,11 +162,37 @@ class WhiteSnout:
             st = serve_path.stat()
             self._stat_cache.put(cache_key, st)
 
+        file_size = st.st_size
         etag = compute_etag(st)
         last_modified = format_last_modified(st)
         cache_control = build_cache_control(self.config, file_path.name)
 
+        # Parse Range header
+        range_header = None
+        for name, value in scope.get("headers", []):
+            if name.lower() == b"range":
+                range_header = value.decode()
+                break
+
+        range_spec: tuple[int, int] | None = None
+        if range_header and scope["method"] == "GET":
+            range_spec = parse_range(range_header, file_size)
+            if range_spec is None:
+                sec = security_headers(self.config.security_headers)
+                await send_response(
+                    send,
+                    416,
+                    [
+                        (b"content-range", f"bytes */{file_size}".encode()),
+                        (b"content-type", b"text/plain; charset=utf-8"),
+                        *sec,
+                    ],
+                    b"Range Not Satisfiable",
+                )
+                return
+
         if check_304(scope.get("headers", []), etag, last_modified):
+            sec = security_headers(self.config.security_headers)
             await send_response(
                 send,
                 304,
@@ -164,6 +200,7 @@ class WhiteSnout:
                     (b"etag", etag.encode()),
                     (b"last-modified", last_modified.encode()),
                     (b"cache-control", cache_control.encode()),
+                    *sec,
                 ],
             )
             return
@@ -173,37 +210,61 @@ class WhiteSnout:
             (b"last-modified", last_modified.encode()),
             (b"cache-control", cache_control.encode()),
         ]
+        extra_headers.extend(security_headers(self.config.security_headers))
 
         if content_encoding:
             extra_headers.append((b"content-encoding", content_encoding.encode()))
 
+        status = 206 if range_spec else 200
+        content_length = file_size
+
+        if range_spec:
+            rstart, rend = range_spec
+            content_length = rend - rstart + 1
+            extra_headers.append(
+                (b"content-range", build_content_range(rstart, rend, file_size))
+            )
+
         content_type = guess_content_type(str(file_path), self.config.charset)
         headers = build_headers(
             content_type=content_type,
-            content_length=st.st_size,
+            content_length=content_length,
             extra=extra_headers,
         )
 
         if scope["method"] == "HEAD":
-            await send_response(send, 200, headers)
+            await send_response(send, status, headers)
             return
 
         await send(
             {
                 "type": "http.response.start",
-                "status": 200,
+                "status": status,
                 "headers": headers,
             }
         )
 
-        async for chunk in iter_chunks(serve_path, self.config.chunk_size):
-            await send(
-                {
-                    "type": "http.response.body",
-                    "body": chunk,
-                    "more_body": True,
-                }
-            )
+        if range_spec:
+            rstart, rend = range_spec
+            async for chunk in iter_chunks(
+                serve_path, self.config.chunk_size, start=rstart, end=rend
+            ):
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": chunk,
+                        "more_body": True,
+                    }
+                )
+        else:
+            async for chunk in iter_chunks(serve_path, self.config.chunk_size):
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": chunk,
+                        "more_body": True,
+                    }
+                )
         await send(
             {
                 "type": "http.response.body",

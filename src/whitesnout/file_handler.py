@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import stat as stat_module
+from contextlib import suppress
 from pathlib import Path
 
 
@@ -60,18 +61,48 @@ def is_hashed_file(filename: str, pattern: str) -> bool:
     return bool(re.search(pattern, filename))
 
 
+def parse_accept_encoding(header: str) -> list[str]:
+    """Parse Accept-Encoding header with quality values.
+
+    Returns ordered list of encoding tokens (highest q first).
+    """
+    entries: list[tuple[float, str]] = []
+    for part in header.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        q = 1.0
+        if ";" in part:
+            token, params = part.split(";", 1)
+            for param in params.split(";"):
+                param = param.strip()
+                if param.startswith("q="):
+                    with suppress(ValueError):
+                        q = float(param[2:])
+        else:
+            token = part
+        entries.append((q, token.lower()))
+
+    entries.sort(key=lambda x: x[0], reverse=True)
+    return [token for _, token in entries]
+
+
 def find_compressed(
     file_path: Path,
     accept_encoding: str,
+    allow_brotli: bool = True,
+    allow_gzip: bool = True,
 ) -> tuple[Path, str] | None:
-    if "br" in accept_encoding.lower():
-        br_path = file_path.with_suffix(file_path.suffix + ".br")
-        if br_path.exists():
-            return br_path, "br"
+    encodings = parse_accept_encoding(accept_encoding)
 
-    if "gzip" in accept_encoding.lower():
-        gz_path = file_path.with_suffix(file_path.suffix + ".gz")
-        if gz_path.exists():
-            return gz_path, "gzip"
+    for enc in encodings:
+        if enc == "br" and allow_brotli:
+            br_path = file_path.with_suffix(file_path.suffix + ".br")
+            if br_path.exists():
+                return br_path, "br"
+        if enc == "gzip" and allow_gzip:
+            gz_path = file_path.with_suffix(file_path.suffix + ".gz")
+            if gz_path.exists():
+                return gz_path, "gzip"
 
     return None

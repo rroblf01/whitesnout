@@ -301,3 +301,124 @@ async def test_passes_to_inner_app_when_not_found() -> None:
     await app(scope, receive, send)
     assert inner_response["called"]
     assert b"from inner" in b"".join(body_chunks)
+
+
+@pytest.mark.asyncio
+async def test_security_headers_present(client: ASGITestClient) -> None:
+    app = WhiteSnout(directory="tests/static", security_headers=True)
+    resp = await client_get(app, "/hello.txt")
+    assert resp["status"] == 200
+    assert resp["headers"][b"x-content-type-options"] == b"nosniff"
+    assert resp["headers"][b"x-frame-options"] == b"DENY"
+
+
+@pytest.mark.asyncio
+async def test_security_headers_disabled_by_default(client: ASGITestClient) -> None:
+    app = WhiteSnout(directory="tests/static", security_headers=False)
+    resp = await client_get(app, "/hello.txt")
+    assert b"x-content-type-options" not in resp["headers"]
+    assert b"x-frame-options" not in resp["headers"]
+
+
+@pytest.mark.asyncio
+async def test_security_headers_default_enabled() -> None:
+    app = WhiteSnout(directory="tests/static")
+    resp = await client_get(app, "/hello.txt")
+    assert resp["headers"][b"x-content-type-options"] == b"nosniff"
+    assert resp["headers"][b"x-frame-options"] == b"DENY"
+
+
+@pytest.mark.asyncio
+async def test_range_request_partial(client: ASGITestClient) -> None:
+    app = WhiteSnout(directory="tests/static")
+    resp = await client_get(
+        app,
+        "/hello.txt",
+        extra_headers=[(b"range", b"bytes=0-4")],
+    )
+    assert resp["status"] == 206
+    assert resp["headers"][b"content-range"] == b"bytes 0-4/14"
+    assert resp["body"] == b"Hello"
+
+
+@pytest.mark.asyncio
+async def test_range_request_suffix(client: ASGITestClient) -> None:
+    app = WhiteSnout(directory="tests/static")
+    resp = await client_get(
+        app,
+        "/hello.txt",
+        extra_headers=[(b"range", b"bytes=-4")],
+    )
+    assert resp["status"] == 206
+    assert resp["body"] == b"ld!\n"
+
+
+@pytest.mark.asyncio
+async def test_range_not_satisfiable(client: ASGITestClient) -> None:
+    app = WhiteSnout(directory="tests/static")
+    resp = await client_get(
+        app,
+        "/hello.txt",
+        extra_headers=[(b"range", b"bytes=100-110")],
+    )
+    assert resp["status"] == 416
+    assert resp["headers"][b"content-range"] == b"bytes */14"
+    assert b"content-type" in resp["headers"]
+
+
+@pytest.mark.asyncio
+async def test_range_ignored_with_nonexistent_file(client: ASGITestClient) -> None:
+    app = WhiteSnout(directory="tests/static")
+    resp = await client_get(
+        app,
+        "/nope.txt",
+        extra_headers=[(b"range", b"bytes=0-4")],
+    )
+    assert resp["status"] == 404
+
+
+@pytest.mark.asyncio
+async def test_accept_encoding_quality_values() -> None:
+    app = WhiteSnout(directory="tests/static")
+    resp = await client_get(app, "/hello.txt", accept_encoding="br;q=0.1, gzip")
+    assert resp["status"] == 200
+    assert resp["headers"][b"content-encoding"] == b"gzip"
+
+
+async def client_get(
+    app, path: str, accept_encoding: str = "", extra_headers: list | None = None
+) -> dict:
+    headers = list(extra_headers or [])
+    if accept_encoding:
+        headers.append((b"accept-encoding", accept_encoding.encode()))
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": b"",
+        "headers": headers,
+        "http_version": "1.1",
+        "scheme": "http",
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    response_start = {}
+    body_chunks = []
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(event):
+        nonlocal response_start
+        if event["type"] == "http.response.start":
+            response_start = event
+        elif event["type"] == "http.response.body":
+            body_chunks.append(event.get("body", b""))
+
+    await app(scope, receive, send)
+    return {
+        "status": response_start.get("status", 500),
+        "headers": dict(response_start.get("headers", [])),
+        "body": b"".join(body_chunks),
+    }

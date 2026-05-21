@@ -102,6 +102,86 @@ def test_build_cache_control() -> None:
     assert "max-age=3600" in normal_cc
 
 
+def test_parse_accept_encoding() -> None:
+    from whitesnout.file_handler import parse_accept_encoding
+
+    assert parse_accept_encoding("gzip, br") == ["gzip", "br"]
+    assert parse_accept_encoding("br;q=0.1, gzip") == ["gzip", "br"]
+    assert parse_accept_encoding("br;q=0.5, gzip;q=0.8") == ["gzip", "br"]
+    assert parse_accept_encoding("") == []
+    assert parse_accept_encoding("gzip") == ["gzip"]
+    assert parse_accept_encoding("br;q=0") == ["br"]
+
+
+def test_find_compressed_respects_brotli_flag() -> None:
+    from pathlib import Path
+
+    from whitesnout.file_handler import find_compressed
+
+    file_path = Path("tests/static/hello.txt")
+    result = find_compressed(file_path, "br", allow_brotli=True)
+    assert result is not None
+    assert result[1] == "br"
+
+    result_disabled = find_compressed(file_path, "br", allow_brotli=False)
+    assert result_disabled is None
+
+
+def test_find_compressed_respects_gzip_flag() -> None:
+    from pathlib import Path
+
+    from whitesnout.file_handler import find_compressed
+
+    file_path = Path("tests/static/hello.txt")
+    result = find_compressed(file_path, "gzip", allow_gzip=True)
+    assert result is not None
+    assert result[1] == "gzip"
+
+    result_disabled = find_compressed(file_path, "gzip", allow_gzip=False)
+    assert result_disabled is None
+
+
+def test_parse_range_valid() -> None:
+    from whitesnout.response import parse_range
+
+    assert parse_range("bytes=0-9", 100) == (0, 9)
+    assert parse_range("bytes=10-19", 100) == (10, 19)
+    assert parse_range("bytes=90-", 100) == (90, 99)
+    assert parse_range("bytes=-10", 100) == (90, 99)
+    assert parse_range("bytes=0-0", 100) == (0, 0)
+
+
+def test_parse_range_invalid() -> None:
+    from whitesnout.response import parse_range
+
+    assert parse_range("bytes=100-110", 100) is None
+    assert parse_range("bytes=-0", 100) is None
+    assert parse_range("bytes=10-5", 100) is None
+    assert parse_range("", 100) is None
+    assert parse_range("invalid", 100) is None
+
+
+def test_build_content_range() -> None:
+    from whitesnout.response import build_content_range
+
+    assert build_content_range(0, 9, 100) == b"bytes 0-9/100"
+    assert build_content_range(50, 99, 100) == b"bytes 50-99/100"
+
+
+def test_security_headers_enabled() -> None:
+    from whitesnout.response import security_headers
+
+    headers = dict(security_headers(True))
+    assert headers.get(b"x-content-type-options") == b"nosniff"
+    assert headers.get(b"x-frame-options") == b"DENY"
+
+
+def test_security_headers_disabled() -> None:
+    from whitesnout.response import security_headers
+
+    assert security_headers(False) == []
+
+
 async def _request(app, path: str, accept_encoding: str):
     headers = []
     if accept_encoding:
