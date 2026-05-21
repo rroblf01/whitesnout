@@ -385,6 +385,85 @@ async def test_accept_encoding_quality_values() -> None:
     assert resp["headers"][b"content-encoding"] == b"gzip"
 
 
+@pytest.mark.asyncio
+async def test_cors_headers_present() -> None:
+    app = WhiteSnout(directory="tests/static", cors=True)
+    resp = await client_get(app, "/hello.txt")
+    assert resp["status"] == 200
+    assert resp["headers"][b"access-control-allow-origin"] == b"*"
+
+
+@pytest.mark.asyncio
+async def test_cors_disabled_by_default(client: ASGITestClient) -> None:
+    resp = await client.get("/hello.txt")
+    assert b"access-control-allow-origin" not in resp["headers"]
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight() -> None:
+    app = WhiteSnout(directory="tests/static", cors=True)
+    scope: dict = {
+        "type": "http",
+        "method": "OPTIONS",
+        "path": "/hello.txt",
+        "raw_path": b"/hello.txt",
+        "query_string": b"",
+        "headers": [],
+        "http_version": "1.1",
+        "scheme": "http",
+        "client": ("127.0.0.1", 50000),
+        "server": ("127.0.0.1", 8000),
+    }
+    response_start: dict = {}
+    body_chunks: list[bytes] = []
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(event):
+        nonlocal response_start
+        if event["type"] == "http.response.start":
+            response_start = event
+        elif event["type"] == "http.response.body":
+            body_chunks.append(event.get("body", b""))
+
+    await app(scope, receive, send)
+    assert response_start["status"] == 204
+    headers = dict(response_start.get("headers", []))
+    assert headers[b"access-control-allow-origin"] == b"*"
+
+
+@pytest.mark.asyncio
+async def test_invalidate_cache() -> None:
+    from whitesnout import WhiteSnout
+
+    app = WhiteSnout(directory="tests/static")
+    # Stat a real file to get a valid stat_result
+    from pathlib import Path
+
+    st = Path("tests/static/hello.txt").stat()
+    app._stat_cache.put("test_key", st)
+    assert app._stat_cache.get("test_key") is not None
+    app.invalidate_cache()
+    assert app._stat_cache.get("test_key") is None
+
+
+@pytest.mark.asyncio
+async def test_logging(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from whitesnout import WhiteSnout
+
+    logger = logging.getLogger("whitesnout")
+    logger.setLevel(logging.INFO)
+
+    app = WhiteSnout(directory="tests/static")
+    resp = await client_get(app, "/hello.txt")
+    assert resp["status"] == 200
+    assert len(caplog.records) >= 1
+    assert caplog.records[-1].name == "whitesnout"
+
+
 async def client_get(
     app, path: str, accept_encoding: str = "", extra_headers: list | None = None
 ) -> dict:

@@ -17,6 +17,7 @@ class Config:
         "gzip",
         "max_cache_size",
         "security_headers",
+        "cors",
     )
 
     def __init__(
@@ -34,6 +35,7 @@ class Config:
         gzip: bool = True,
         max_cache_size: int = 100,
         security_headers: bool = True,
+        cors: bool = False,
     ) -> None:
         self.directory = directory
         self.app = app
@@ -47,3 +49,4 @@ class Config:
         self.gzip = gzip
         self.max_cache_size = max_cache_size
         self.security_headers = security_headers
+        self.cors = cors

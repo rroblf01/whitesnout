@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0-dev (unreleased)
+
+### Planned
+
+- **CORS** — Opt-in `cors=True` config adds `Access-Control-Allow-Origin: *` headers
+- **Logging** — Basic request logging (method, path, status, bytes, duration)
+- **Cache invalidation** — Programmatic `invalidate_cache()` method on `WhiteSnout`
+
 ## 0.4.0 (2026-05-21)
 
 ### Added

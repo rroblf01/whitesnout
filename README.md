@@ -233,7 +233,6 @@ v0.1.0 ─── Published
    ├─ v0.4.0  Rust Phase 2 (utils, file_handler) + LRU cache O(1)
    ├─ v0.5.0  CORS + Logging + Cache invalidation
    └─ v1.0.0  Env vars + Async file IO + Benchmarks
-```
 
 ### v0.2.0 — Ruff + Ty
 - Add `ruff` (lint + format) and `ty` (type checker) for code validation
@@ -248,8 +247,7 @@ v0.1.0 ─── Published
 ### v0.4.0 — Rust Phase 2 + LRU O(1)
 - Port `utils.py` (MIME types) → `src/utils.rs`
 - Port `file_handler.py` (find_compressed, is_hashed_file) → `src/file_handler.rs`
-- Replace `Vec`-based Rust LRU with a `LinkedHashMap` for O(1) operations
-- Add Rust unit tests (`#[cfg(test)]`)
+- Replace `Vec`-based Rust LRU with `lru` crate (O(1) operations)
 - Expand MIME type table from 30 → 100+
 
 ### v0.5.0 — CORS, Logging & Cache invalidation

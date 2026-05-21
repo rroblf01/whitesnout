@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import time
 
 from whitesnout.cache import LRUCache
 from whitesnout.config import Config
@@ -27,12 +29,18 @@ from whitesnout.response import (
 from whitesnout.types import ASGIApp, ASGIReceive, ASGISend
 from whitesnout.utils import guess_content_type
 
+logger = logging.getLogger("whitesnout")
+
 
 def _get_accept_encoding(scope: dict) -> str:
     for name, value in scope.get("headers", []):
         if name.lower() == b"accept-encoding":
             return value.decode()
     return ""
+
+
+def _cors_headers() -> list[tuple[bytes, bytes]]:
+    return [(b"access-control-allow-origin", b"*")]
 
 
 class WhiteSnout:
@@ -53,6 +61,7 @@ class WhiteSnout:
         gzip: bool = True,
         max_cache_size: int = 100,
         security_headers: bool = True,
+        cors: bool = False,
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -67,10 +76,15 @@ class WhiteSnout:
             gzip=gzip,
             max_cache_size=max_cache_size,
             security_headers=security_headers,
+            cors=cors,
         )
         self._stat_cache: LRUCache[str, os.stat_result] = LRUCache(
             maxsize=max_cache_size
         )
+
+    def invalidate_cache(self) -> None:
+        """Purge the stat cache."""
+        self._stat_cache.clear()
 
     async def __call__(
         self,
@@ -78,13 +92,15 @@ class WhiteSnout:
         receive: ASGIReceive,
         send: ASGISend,
     ) -> None:
+        t0 = time.perf_counter()
+
         if scope["type"] != "http":
             app = self.config.app
             if app is not None:
                 await app(scope, receive, send)
             return
 
-        if scope["method"] not in ("GET", "HEAD"):
+        if scope["method"] not in ("GET", "HEAD") and scope["method"] != "OPTIONS":
             if self.config.app is not None:
                 await self.config.app(scope, receive, send)
             else:
@@ -96,6 +112,26 @@ class WhiteSnout:
                     method_not_allowed_headers(),
                     b"Method Not Allowed",
                 )
+            return
+
+        # CORS preflight
+        if scope["method"] == "OPTIONS":
+            if self.config.cors:
+                extra = _cors_headers()
+            else:
+                await send_response(
+                    send,
+                    405,
+                    not_found_headers(),
+                    b"Method Not Allowed",
+                )
+                return
+            headers = build_headers(
+                content_type="text/plain; charset=utf-8",
+                content_length=0,
+                extra=extra,
+            )
+            await send_response(send, 204, headers)
             return
 
         path = scope["path"].split("?")[0]
@@ -179,6 +215,7 @@ class WhiteSnout:
             range_spec = parse_range(range_header, file_size)
             if range_spec is None:
                 sec = security_headers(self.config.security_headers)
+                cors = _cors_headers() if self.config.cors else []
                 await send_response(
                     send,
                     416,
@@ -186,6 +223,7 @@ class WhiteSnout:
                         (b"content-range", f"bytes */{file_size}".encode()),
                         (b"content-type", b"text/plain; charset=utf-8"),
                         *sec,
+                        *cors,
                     ],
                     b"Range Not Satisfiable",
                 )
@@ -193,6 +231,7 @@ class WhiteSnout:
 
         if check_304(scope.get("headers", []), etag, last_modified):
             sec = security_headers(self.config.security_headers)
+            cors = _cors_headers() if self.config.cors else []
             await send_response(
                 send,
                 304,
@@ -201,6 +240,7 @@ class WhiteSnout:
                     (b"last-modified", last_modified.encode()),
                     (b"cache-control", cache_control.encode()),
                     *sec,
+                    *cors,
                 ],
             )
             return
@@ -211,6 +251,8 @@ class WhiteSnout:
             (b"cache-control", cache_control.encode()),
         ]
         extra_headers.extend(security_headers(self.config.security_headers))
+        if self.config.cors:
+            extra_headers.extend(_cors_headers())
 
         if content_encoding:
             extra_headers.append((b"content-encoding", content_encoding.encode()))
@@ -271,4 +313,14 @@ class WhiteSnout:
                 "body": b"",
                 "more_body": False,
             }
+        )
+
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "%s %s %s %s %.1fms",
+            scope["method"],
+            path,
+            status,
+            content_length,
+            elapsed * 1000,
         )
