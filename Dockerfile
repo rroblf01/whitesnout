@@ -1,4 +1,4 @@
-FROM rust:slim-trixie
+FROM rust:1.95.0-slim-trixie
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSL https://astral.sh/uv/install.sh | sh
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 ENV PATH="/root/.cargo/bin:/root/.local/bin:$PATH"
 
 RUN cargo install maturin
