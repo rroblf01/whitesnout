@@ -30,7 +30,7 @@ jobs:
         if: matrix.os == 'macos-latest'
         run: rustup target add x86_64-apple-darwin
 
-      - uses: pypa/cibuildwheel@v2.23
+      - uses: pypa/cibuildwheel@v3.4
         with:
           output-dir: dist/
 
