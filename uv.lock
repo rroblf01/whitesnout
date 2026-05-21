@@ -226,6 +226,11 @@ name = "whitesnout"
 version = "0.1.0"
 source = { editable = "." }
 
+[package.optional-dependencies]
+compress = [
+    { name = "brotli" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "brotli" },
@@ -234,6 +239,8 @@ dev = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "brotli", marker = "extra == 'compress'" }]
+provides-extras = ["compress"]
 
 [package.metadata.requires-dev]
 dev = [
