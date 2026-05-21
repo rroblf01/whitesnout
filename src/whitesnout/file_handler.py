@@ -34,3 +34,20 @@ def file_stat(path: Path) -> os.stat_result | None:
 
 def is_hashed_file(filename: str, pattern: str) -> bool:
     return bool(re.search(pattern, filename))
+
+
+def find_compressed(
+    file_path: Path,
+    accept_encoding: str,
+) -> tuple[Path, str] | None:
+    if "br" in accept_encoding.lower():
+        br_path = file_path.with_suffix(file_path.suffix + ".br")
+        if br_path.exists():
+            return br_path, "br"
+
+    if "gzip" in accept_encoding.lower():
+        gz_path = file_path.with_suffix(file_path.suffix + ".gz")
+        if gz_path.exists():
+            return gz_path, "gzip"
+
+    return None

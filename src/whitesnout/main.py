@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from whitesnout.config import Config
-from whitesnout.file_handler import sanitize_path
+from whitesnout.file_handler import find_compressed, sanitize_path
 from whitesnout.response import (
     build_cache_control,
     build_headers,
@@ -13,6 +13,13 @@ from whitesnout.response import (
     send_response,
 )
 from whitesnout.utils import guess_content_type
+
+
+def _get_accept_encoding(scope: dict) -> str:
+    for name, value in scope.get("headers", []):
+        if name.lower() == b"accept-encoding":
+            return value.decode()
+    return ""
 
 
 class WhiteSnout:
@@ -87,7 +94,16 @@ class WhiteSnout:
                 )
             return
 
-        st = file_path.stat()
+        accept_encoding = _get_accept_encoding(scope)
+        compressed = find_compressed(file_path, accept_encoding)
+
+        if compressed is not None:
+            serve_path, content_encoding = compressed
+        else:
+            serve_path = file_path
+            content_encoding = None
+
+        st = serve_path.stat()
 
         etag = compute_etag(st)
         last_modified = format_last_modified(st)
@@ -107,6 +123,9 @@ class WhiteSnout:
             (b"cache-control", cache_control.encode()),
         ]
 
+        if content_encoding:
+            extra_headers.append((b"content-encoding", content_encoding.encode()))
+
         content_type = guess_content_type(str(file_path), self.config.charset)
         headers = build_headers(
             content_type=content_type,
@@ -124,7 +143,7 @@ class WhiteSnout:
             "headers": headers,
         })
 
-        async for chunk in iter_chunks(file_path, self.config.chunk_size):
+        async for chunk in iter_chunks(serve_path, self.config.chunk_size):
             await send({
                 "type": "http.response.body",
                 "body": chunk,
