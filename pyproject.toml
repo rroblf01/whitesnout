@@ -35,6 +35,7 @@ dev = [
     "ruff>=0.15.13",
     "ty>=0.0.38",
     "uvicorn>=0.47.0",
+    "whitenoise>=6.12.0",
 ]
 
 [tool.cibuildwheel]

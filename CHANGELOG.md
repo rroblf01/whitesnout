@@ -1,12 +1,23 @@
 # Changelog
 
-## 0.4.0-dev (unreleased)
+## 0.4.0 (2026-05-21)
 
-### Planned
+### Added
 
-- **Rust Phase 2** — port `utils.py` (MIME types) and `file_handler.py` (find_compressed, is_hashed_file) to Rust
-- **LRU cache O(1)** — replace `Vec`-based Rust LRU with a `LinkedHashMap` for constant-time operations
-- **Expanded MIME types** — from 30 to 100+ entries
+- **Rust Phase 2** — `utils.py` (MIME types, `guess_content_type`) and `file_handler.py` (`find_compressed`, `parse_accept_encoding`, `is_hashed_file`) ported to Rust via PyO3
+- **Expanded MIME types** — from 25 to 100+ entries covering web, images, fonts, documents, archives, audio, video, programming languages, and system formats
+- **Rust unit tests** — `#[cfg(test)]` tests in `cache.rs`
+
+### Changed
+
+- **O(1) LRU cache** — replaced `Vec`-based O(n) implementation with the `lru` crate (`LruCache`) for constant-time get/put operations
+- **Python fallback** — `utils.py` and `file_handler.py` try the Rust extension first, fall back to pure Python if unavailable
+- **Benchmark updated** — whitesnout 859 RPS vs whitenoise 767 RPS (+12%) with similar RAM usage
+- **Cargo dependencies** — added `regex` and `lru` crates
+
+### Removed
+
+- **Old Vec-based LRU** — removed custom O(n) LRU implementation from `src/cache.rs`
 
 ## 0.3.0 (2026-05-21)
 
