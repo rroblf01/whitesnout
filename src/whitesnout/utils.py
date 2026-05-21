@@ -7,7 +7,7 @@ try:
 
     _RUST_AVAILABLE = True
 except ImportError:
-    _rs_guess_content_type = None  # type: ignore[assignment]
+    _rs_guess_content_type = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
 MIME_TYPES: dict[str, str] = {
     # Web
@@ -154,7 +154,7 @@ MIME_TYPES: dict[str, str] = {
 
 def guess_content_type(path: str, charset: str = "utf-8") -> str:
     if _RUST_AVAILABLE:
-        return _rs_guess_content_type(path, charset)  # ty: ignore[call-non-callable]
+        return _rs_guess_content_type(path, charset)
 
     import os
 

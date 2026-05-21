@@ -8,7 +8,7 @@ def load_manifest(manifest_path: str | Path) -> set[str]:
     """Load a Django/Webpack-style staticfiles manifest.
 
     Accepts either:
-    - Django ManifestStaticFilesStorage format: `{"paths": {"name": "hashed-name"}, ...}`
+    - Django ManifestStaticFilesStorage: `{"paths": {"name": "hashed-name"}, ...}`
     - Webpack manifest format: `{"name": "hashed-name", ...}`
     - Vite manifest format: `{"name": {"file": "hashed-name", ...}, ...}`
 

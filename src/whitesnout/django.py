@@ -22,6 +22,7 @@ In development, pass ``use_finders=True`` to skip ``collectstatic``::
 
     application = get_static_application(use_finders=True, autorefresh=True)
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -69,7 +70,7 @@ def get_static_application(
         asgi_app = get_asgi_application()
 
     static_root = getattr(settings, "STATIC_ROOT", None)
-    static_url = (getattr(settings, "STATIC_URL", "/static/") or "/static/")
+    static_url = getattr(settings, "STATIC_URL", "/static/") or "/static/"
     if not static_url.startswith("/"):
         static_url = "/" + static_url
     if not static_url.endswith("/"):

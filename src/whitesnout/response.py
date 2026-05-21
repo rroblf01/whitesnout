@@ -397,6 +397,7 @@ def build_full_response(
     if if_modified_since is not None:
         try:
             import email.utils as _eu  # noqa: PLC0415
+
             since_dt = _eu.parsedate_to_datetime(if_modified_since)
             lm_dt = _eu.parsedate_to_datetime(last_modified)
             if lm_dt is not None and since_dt is not None and lm_dt <= since_dt:
@@ -471,13 +472,17 @@ def build_response_pipeline(
     if_modified_since: str | None,
     is_hashed_override: bool | None = None,
     add_vary: bool = True,
-) -> tuple[Path, list[tuple[bytes, bytes]], int, int, tuple[int, int] | None, bool, str | None]:
+) -> tuple[
+    Path, list[tuple[bytes, bytes]], int, int, tuple[int, int] | None, bool, str | None
+]:
     file_path_str = str(file_path)
     if _RUST_AVAILABLE:
         try:
-            from whitesnout._rs import StatCache as _RustStatCache  # type: ignore
+            from whitesnout._rs import (
+                StatCache as _RustStatCache,  # noqa: N806
+            )
         except ImportError:
-            _RustStatCache = None  # type: ignore
+            _RustStatCache = None  # type: ignore # noqa: N806
 
         if _RustStatCache is not None and isinstance(stat_cache_impl, _RustStatCache):
             (
@@ -508,9 +513,19 @@ def build_response_pipeline(
                 is_hashed_override,
                 add_vary,
             )
-            serve_path = file_path if serve_path_str == file_path_str else Path(serve_path_str)
+            serve_path = (
+                file_path if serve_path_str == file_path_str else Path(serve_path_str)
+            )
             headers: list[tuple[bytes, bytes]] = list(raw_headers)
-            return (serve_path, headers, status, content_length, range_spec, is_304, _content_encoding)
+            return (
+                serve_path,
+                headers,
+                status,
+                content_length,
+                range_spec,
+                is_304,
+                _content_encoding,
+            )
 
     # Python / non-fused fallback
     from whitesnout.file_handler import find_compressed
@@ -553,7 +568,15 @@ def build_response_pipeline(
         if_modified_since=if_modified_since,
         file_path_str=file_path_str,
     )
-    return (serve_path, headers, status, content_length, range_spec, is_304, content_encoding)
+    return (
+        serve_path,
+        headers,
+        status,
+        content_length,
+        range_spec,
+        is_304,
+        content_encoding,
+    )
 
 
 def check_304(
@@ -587,6 +610,7 @@ def check_304(
     if modified_since is not None:
         try:
             import email.utils as _eu  # noqa: PLC0415
+
             since_dt = _eu.parsedate_to_datetime(modified_since)
             lm_dt = _eu.parsedate_to_datetime(last_modified)
             if lm_dt is not None and since_dt is not None and lm_dt <= since_dt:

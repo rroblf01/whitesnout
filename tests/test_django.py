@@ -3,6 +3,7 @@
 Django is configured per-test via `settings.configure(...)` so the suite
 does not need a full project layout.
 """
+
 from __future__ import annotations
 
 import json
@@ -10,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-
 # ----------------------------------------------------------------------
 # Django settings bootstrap helpers
 # ----------------------------------------------------------------------
+
 
 def _configure_django(**overrides) -> None:
     """Configure Django settings inline. Safe to call multiple times — the
@@ -52,6 +53,7 @@ urlpatterns: list = []
 # ----------------------------------------------------------------------
 # whitesnout.django
 # ----------------------------------------------------------------------
+
 
 def test_get_static_application_requires_static_root_unless_use_finders(
     tmp_path: Path,
@@ -106,13 +108,10 @@ def test_get_static_application_detects_manifest_via_storages_dict(
     _configure_django(
         STATIC_ROOT=str(static_root),
         STORAGES={
-            "default": {
-                "BACKEND": "django.core.files.storage.FileSystemStorage"
-            },
+            "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
             "staticfiles": {
                 "BACKEND": (
-                    "django.contrib.staticfiles.storage."
-                    "ManifestStaticFilesStorage"
+                    "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
                 )
             },
         },
@@ -159,6 +158,7 @@ def test_get_static_application_mounts_non_default_static_url(
 # Finders resolver behavior
 # ----------------------------------------------------------------------
 
+
 async def test_finders_resolver_resolves_static_path(tmp_path: Path) -> None:
     finder_root = tmp_path / "app_static"
     finder_root.mkdir()
@@ -169,8 +169,8 @@ async def test_finders_resolver_resolves_static_path(tmp_path: Path) -> None:
         STATICFILES_DIRS=[str(finder_root)],
         DEBUG=True,
     )
-    from whitesnout.django import get_static_application
     from tests.conftest import ASGITestClient
+    from whitesnout.django import get_static_application
 
     snout = get_static_application(use_finders=True)
     client = ASGITestClient(snout)
@@ -183,6 +183,7 @@ async def test_finders_resolver_resolves_static_path(tmp_path: Path) -> None:
 # whitesnout.storage
 # ----------------------------------------------------------------------
 
+
 def test_compressed_manifest_storage_generates_gz_br(tmp_path: Path) -> None:
     _configure_django(
         STATIC_ROOT=str(tmp_path / "static_out"),
@@ -192,7 +193,9 @@ def test_compressed_manifest_storage_generates_gz_br(tmp_path: Path) -> None:
 
     from whitesnout.storage import CompressedManifestStaticFilesStorage
 
-    storage = CompressedManifestStaticFilesStorage(location=str(tmp_path / "static_out"))
+    # Instantiate to verify the class is importable / constructible
+    CompressedManifestStaticFilesStorage(location=str(tmp_path / "static_out"))
+
     # Drop a fake hashed file in the storage location
     asset_name = "app.abc12345.css"
     target = tmp_path / "static_out" / asset_name

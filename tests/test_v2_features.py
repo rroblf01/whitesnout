@@ -1,9 +1,9 @@
 """Tests for v2.0.0 new features: Vary, CORS allowlist, extra security
 headers, custom MIME types, manifest, autocompress, on_request hook.
 """
+
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 
@@ -19,8 +19,8 @@ from whitesnout.autocompress import (
 )
 from whitesnout.manifest import load_manifest
 
-
 # ---------- Vary header ----------
+
 
 async def test_vary_accept_encoding_present(tmp_path: Path) -> None:
     (tmp_path / "a.css").write_text("body{}")
@@ -42,6 +42,7 @@ async def test_vary_absent_when_compression_disabled(tmp_path: Path) -> None:
 
 # ---------- CORS allowlist ----------
 
+
 async def test_cors_allowlist_match(tmp_path: Path) -> None:
     (tmp_path / "a.css").write_text("x")
     app = WhiteSnout(
@@ -49,12 +50,9 @@ async def test_cors_allowlist_match(tmp_path: Path) -> None:
         cors_allow_origins=["https://example.com"],
     )
     client = ASGITestClient(app)
-    r = await client.get(
-        "/a.css", headers=[(b"origin", b"https://example.com")]
-    )
+    r = await client.get("/a.css", headers=[(b"origin", b"https://example.com")])
     assert r["headers"].get(b"access-control-allow-origin") == b"https://example.com"
-    # Vary: Origin is appended for non-wildcard allowlist
-    vary_vals = [v for k, v in [(k, r["headers"].get(k)) for k in (b"vary",)] if v]
+    # Vary: Origin is appended for non-wildcard allowlist.
     # Headers dict only stores last value for repeated keys; check it includes Origin
     assert b"Origin" in r["headers"].get(b"vary", b"")
 
@@ -66,9 +64,7 @@ async def test_cors_allowlist_no_match(tmp_path: Path) -> None:
         cors_allow_origins=["https://allowed.com"],
     )
     client = ASGITestClient(app)
-    r = await client.get(
-        "/a.css", headers=[(b"origin", b"https://evil.com")]
-    )
+    r = await client.get("/a.css", headers=[(b"origin", b"https://evil.com")])
     assert b"access-control-allow-origin" not in r["headers"]
 
 
@@ -81,6 +77,7 @@ async def test_cors_legacy_wildcard(tmp_path: Path) -> None:
 
 
 # ---------- Extra security headers ----------
+
 
 async def test_hsts_csp_headers(tmp_path: Path) -> None:
     (tmp_path / "a.css").write_text("x")
@@ -102,6 +99,7 @@ async def test_hsts_csp_headers(tmp_path: Path) -> None:
 
 # ---------- Custom MIME types ----------
 
+
 async def test_custom_mime_type_override(tmp_path: Path) -> None:
     (tmp_path / "file.epub").write_bytes(b"PK\x03\x04dummy")
     app = WhiteSnout(
@@ -115,14 +113,19 @@ async def test_custom_mime_type_override(tmp_path: Path) -> None:
 
 # ---------- Manifest ----------
 
+
 def test_manifest_django_format(tmp_path: Path) -> None:
     manifest = tmp_path / "staticfiles.json"
-    manifest.write_text(json.dumps({
-        "paths": {
-            "css/app.css": "css/app.abc123def456.css",
-            "js/app.js": "js/app.xyz789ghi012.js",
-        }
-    }))
+    manifest.write_text(
+        json.dumps(
+            {
+                "paths": {
+                    "css/app.css": "css/app.abc123def456.css",
+                    "js/app.js": "js/app.xyz789ghi012.js",
+                }
+            }
+        )
+    )
     paths = load_manifest(manifest)
     assert "/css/app.abc123def456.css" in paths
     assert "/js/app.xyz789ghi012.js" in paths
@@ -130,10 +133,14 @@ def test_manifest_django_format(tmp_path: Path) -> None:
 
 def test_manifest_webpack_format(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({
-        "main.js": "main.abcd1234.js",
-        "style.css": "style.efgh5678.css",
-    }))
+    manifest.write_text(
+        json.dumps(
+            {
+                "main.js": "main.abcd1234.js",
+                "style.css": "style.efgh5678.css",
+            }
+        )
+    )
     paths = load_manifest(manifest)
     assert "/main.abcd1234.js" in paths
     assert "/style.efgh5678.css" in paths
@@ -141,9 +148,11 @@ def test_manifest_webpack_format(tmp_path: Path) -> None:
 
 def test_manifest_vite_format(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({
-        "src/main.ts": {"file": "assets/main.aaaa1111.js", "src": "src/main.ts"}
-    }))
+    manifest.write_text(
+        json.dumps(
+            {"src/main.ts": {"file": "assets/main.aaaa1111.js", "src": "src/main.ts"}}
+        )
+    )
     paths = load_manifest(manifest)
     assert "/assets/main.aaaa1111.js" in paths
 
@@ -165,6 +174,7 @@ async def test_manifest_forces_immutable(tmp_path: Path) -> None:
 
 
 # ---------- Autocompress ----------
+
 
 def test_compressed_cache_lru() -> None:
     c = CompressedCache(max_entries=2)
@@ -200,15 +210,14 @@ async def test_autocompress_serves_gzip(tmp_path: Path) -> None:
     (tmp_path / "big.txt").write_bytes(payload)
     app = WhiteSnout(directory=str(tmp_path), autocompress=True)
     client = ASGITestClient(app)
-    r = await client.get(
-        "/big.txt", headers=[(b"accept-encoding", b"gzip")]
-    )
+    r = await client.get("/big.txt", headers=[(b"accept-encoding", b"gzip")])
     assert r["status"] == 200
     assert r["headers"].get(b"content-encoding") == b"gzip"
     assert len(r["body"]) < len(payload)
 
 
 # ---------- on_request hook ----------
+
 
 async def test_on_request_sync_hook(tmp_path: Path) -> None:
     (tmp_path / "a.css").write_text("x")
@@ -250,10 +259,9 @@ async def test_on_request_hook_exception_swallowed(tmp_path: Path) -> None:
 
 # ---------- Config / env ----------
 
+
 def test_env_cors_allow_origins(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv(
-        "WHITESNOUT_CORS_ALLOW_ORIGINS", "https://a.com, https://b.com"
-    )
+    monkeypatch.setenv("WHITESNOUT_CORS_ALLOW_ORIGINS", "https://a.com, https://b.com")
     from whitesnout.config import Config
 
     c = Config()
@@ -269,6 +277,7 @@ def test_env_hsts(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ---------- Autorefresh + path_resolver ----------
+
 
 async def test_autorefresh_picks_up_new_file(tmp_path: Path) -> None:
     (tmp_path / "a.css").write_text("v1")

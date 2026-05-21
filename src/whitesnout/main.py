@@ -93,9 +93,7 @@ def _resolve_cors_origin(
     return None
 
 
-def _patch_content_length(
-    headers: list[tuple[bytes, bytes]], new_length: int
-) -> None:
+def _patch_content_length(headers: list[tuple[bytes, bytes]], new_length: int) -> None:
     new_val = str(new_length).encode()
     for i, (k, _) in enumerate(headers):
         if k == b"content-length":
@@ -106,7 +104,7 @@ def _patch_content_length(
 def _override_content_type(
     headers: list[tuple[bytes, bytes]], file_path_str: str, mime_types: dict[str, str]
 ) -> None:
-    """Replace content-type header when the user provided a custom MIME for this extension."""
+    """Replace content-type when the user provided a custom MIME for this extension."""
     if not mime_types:
         return
     dot = file_path_str.rfind(".")
@@ -370,9 +368,7 @@ class WhiteSnout:
                 if name.lower() == b"origin":
                     request_origin = value.decode()
                     break
-            allowed = _resolve_cors_origin(
-                config.cors_allow_origins, request_origin
-            )
+            allowed = _resolve_cors_origin(config.cors_allow_origins, request_origin)
             if allowed is None:
                 body = config.error_responses.get(405, b"")
                 await send_response(

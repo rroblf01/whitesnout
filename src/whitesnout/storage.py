@@ -16,12 +16,27 @@ Example (Django 4.2+)::
 The compressed storage skips already-compressed extensions (jpg, png,
 webp, woff2, …) and avoids re-compressing files that haven't changed.
 """
+
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-_SKIP = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".woff", ".woff2", ".gz", ".br", ".zip", ".mp4", ".webm"}
+_SKIP = {
+    ".jpg",
+    ".jpeg",
+    ".png",
+    ".gif",
+    ".webp",
+    ".woff",
+    ".woff2",
+    ".gz",
+    ".br",
+    ".zip",
+    ".mp4",
+    ".webm",
+}
 
 
 try:
@@ -30,8 +45,8 @@ try:
         StaticFilesStorage,
     )
 except ImportError:  # pragma: no cover - Django is optional
-    ManifestStaticFilesStorage = object  # type: ignore[assignment,misc]
-    StaticFilesStorage = object  # type: ignore[assignment,misc]
+    ManifestStaticFilesStorage = object  # type: ignore[assignment,misc]  # ty: ignore[invalid-assignment]
+    StaticFilesStorage = object  # type: ignore[assignment,misc]  # ty: ignore[invalid-assignment]
 
 
 def _compress_one(file_path: Path) -> tuple[int, int]:
@@ -46,6 +61,7 @@ def _compress_one(file_path: Path) -> tuple[int, int]:
     gz = _compress_gzip(file_path, force=False)
     try:
         import brotli  # noqa: F401
+
         br = _compress_brotli(file_path, force=False)
     except ImportError:
         br = 0
@@ -84,7 +100,7 @@ class CompressedManifestStaticFilesStorage(ManifestStaticFilesStorage):  # type:
 
         # Compress every hashed file that the parent emitted
         seen: set[str] = set()
-        for original_name, hashed_name, processed in super_results:
+        for _original_name, hashed_name, processed in super_results:
             if not processed or isinstance(processed, Exception):
                 continue
             if hashed_name in seen:

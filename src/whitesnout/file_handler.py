@@ -22,10 +22,10 @@ try:
 
     _RUST_AVAILABLE = True
 except ImportError:
-    _rs_clear_compressed_cache = None  # type: ignore[assignment]
-    _rs_find_compressed = None  # type: ignore[assignment]
-    _rs_is_hashed_file = None  # type: ignore[assignment]
-    _rs_parse_accept_encoding = None  # type: ignore[assignment]
+    _rs_clear_compressed_cache = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    _rs_find_compressed = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    _rs_is_hashed_file = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    _rs_parse_accept_encoding = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
 
 def sanitize_path(root: str, requested_path: str) -> Path | None:
@@ -80,7 +80,7 @@ def file_stat(path: Path) -> os.stat_result | None:
 
 def is_hashed_file(filename: str, pattern: str) -> bool:
     if _RUST_AVAILABLE:
-        return _rs_is_hashed_file(filename, pattern)  # ty: ignore[call-non-callable]
+        return _rs_is_hashed_file(filename, pattern)
     import re
 
     return bool(re.search(pattern, filename))
@@ -88,7 +88,7 @@ def is_hashed_file(filename: str, pattern: str) -> bool:
 
 def parse_accept_encoding(header: str) -> list[str]:
     if _RUST_AVAILABLE:
-        return list(_rs_parse_accept_encoding(header))  # ty: ignore[call-non-callable]
+        return list(_rs_parse_accept_encoding(header))
     entries: list[tuple[float, str]] = []
     for part in header.split(","):
         part = part.strip()
@@ -117,7 +117,7 @@ def find_compressed(
     allow_gzip: bool = True,
 ) -> tuple[Path, str] | None:
     if _RUST_AVAILABLE:
-        result = _rs_find_compressed(  # ty: ignore[call-non-callable]
+        result = _rs_find_compressed(
             str(file_path),
             accept_encoding,
             allow_brotli,

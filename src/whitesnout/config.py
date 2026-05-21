@@ -214,16 +214,25 @@ class Config:
             if skip_compress_extensions is not None
             else env.get(
                 "skip_compress_extensions",
-                {".jpg", ".jpeg", ".png", ".gif", ".webp", ".woff", ".woff2", ".gz", ".br", ".zip"},
+                {
+                    ".jpg",
+                    ".jpeg",
+                    ".png",
+                    ".gif",
+                    ".webp",
+                    ".woff",
+                    ".woff2",
+                    ".gz",
+                    ".br",
+                    ".zip",
+                },
             )
         )
         self.manifest_path = (
             manifest_path if manifest_path is not None else env.get("manifest_path")
         )
         self.autocompress = (
-            autocompress
-            if autocompress is not None
-            else env.get("autocompress", False)
+            autocompress if autocompress is not None else env.get("autocompress", False)
         )
         self.autocompress_max_size = (
             autocompress_max_size
@@ -232,8 +241,6 @@ class Config:
         )
         self.on_request = on_request
         self.autorefresh = (
-            autorefresh
-            if autorefresh is not None
-            else env.get("autorefresh", False)
+            autorefresh if autorefresh is not None else env.get("autorefresh", False)
         )
         self.path_resolver = path_resolver

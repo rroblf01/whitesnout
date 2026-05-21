@@ -14,8 +14,8 @@ try:
 
     _RUST_AVAILABLE = True
 except ImportError:
-    _RustLRUCache = None  # type: ignore[assignment]
-    _RustStatCache = None  # type: ignore[assignment]
+    _RustLRUCache = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+    _RustStatCache = None  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
 
 class LRUCache(Generic[K, V]):
@@ -23,18 +23,18 @@ class LRUCache(Generic[K, V]):
 
     def __init__(self, maxsize: int = 64) -> None:
         if _RUST_AVAILABLE:
-            self._impl: _PyLRUCache | _RustLRUCache = _RustLRUCache(maxsize)  # ty: ignore[call-non-callable]
+            self._impl: _PyLRUCache | _RustLRUCache = _RustLRUCache(maxsize)
         else:
             self._impl = _PyLRUCache(maxsize)
 
     def get(self, key: K) -> V | None:
-        return self._impl.get(key)  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
+        return self._impl.get(key)  # type: ignore[return-value]
 
     def put(self, key: K, value: V) -> None:
-        self._impl.put(key, value)  # type: ignore[arg-type]  # ty: ignore[unresolved-attribute]
+        self._impl.put(key, value)  # type: ignore[arg-type]
 
     def clear(self) -> None:
-        self._impl.clear()  # ty: ignore[unresolved-attribute]
+        self._impl.clear()
 
 
 class _PyLRUCache(Generic[K, V]):
@@ -65,18 +65,18 @@ class StatCache:
 
     def __init__(self, maxsize: int = 64) -> None:
         if _RUST_AVAILABLE:
-            self._impl: _PyStatCache | _RustStatCache = _RustStatCache(maxsize)  # ty: ignore[call-non-callable]
+            self._impl: _PyStatCache | _RustStatCache = _RustStatCache(maxsize)
         else:
             self._impl = _PyStatCache(maxsize)
 
     def get(self, key: str) -> tuple[int, int] | None:
-        return self._impl.get(key)  # type: ignore[return-value]  # ty: ignore[unresolved-attribute]
+        return self._impl.get(key)  # type: ignore[return-value]
 
     def put(self, key: str, size: int, mtime_ns: int) -> None:
-        self._impl.put(key, size, mtime_ns)  # type: ignore[arg-type]  # ty: ignore[unresolved-attribute]
+        self._impl.put(key, size, mtime_ns)  # type: ignore[arg-type]
 
     def clear(self) -> None:
-        self._impl.clear()  # ty: ignore[unresolved-attribute]
+        self._impl.clear()
 
 
 class _PyStatCache:

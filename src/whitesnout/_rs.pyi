@@ -3,14 +3,15 @@
 Generated to match the PyO3 surface defined in `src/lib.rs`. Update this
 file when adding or removing `#[pyfunction]` exports.
 """
+
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any
 
 class LRUCache:
     def __init__(self, maxsize: int = 100) -> None: ...
-    def get(self, key: str) -> object | None: ...
-    def put(self, key: str, value: object) -> None: ...
+    def get(self, key: Any) -> Any: ...
+    def put(self, key: Any, value: Any) -> None: ...
     def clear(self) -> None: ...
 
 class StatCache:
@@ -43,8 +44,8 @@ def build_headers(
 def parse_range(range_header: str, file_size: int) -> tuple[int, int] | None: ...
 def build_content_range(start: int, end: int, total: int) -> str: ...
 def check_304(
-    if_none_match: Optional[str] = None,
-    if_modified_since: Optional[str] = None,
+    if_none_match: str | None = None,
+    if_modified_since: str | None = None,
     etag: str = "",
     last_modified: str = "",
 ) -> bool: ...
@@ -54,10 +55,10 @@ def build_all_headers(
     etag: str,
     last_modified: str,
     cache_control: str,
-    content_encoding: Optional[str] = None,
+    content_encoding: str | None = None,
     security_enabled: bool = True,
     cors_enabled: bool = False,
-    range_header: Optional[str] = None,
+    range_header: str | None = None,
     file_size: int = 0,
 ) -> tuple[list[tuple[bytes, bytes]], int, int, tuple[int, int] | None]: ...
 def build_full_response(
@@ -68,17 +69,15 @@ def build_full_response(
     cache_max_age: int = 3600,
     immutable_max_age: int = 31536000,
     immutable_pattern: str = "",
-    content_encoding: Optional[str] = None,
+    content_encoding: str | None = None,
     security_enabled: bool = True,
     cors_enabled: bool = False,
-    range_header: Optional[str] = None,
+    range_header: str | None = None,
     method: str = "GET",
-    if_none_match: Optional[str] = None,
-    if_modified_since: Optional[str] = None,
+    if_none_match: str | None = None,
+    if_modified_since: str | None = None,
     file_path_str: str = "",
-) -> tuple[
-    list[tuple[bytes, bytes]], int, int, tuple[int, int] | None, bool
-]: ...
+) -> tuple[list[tuple[bytes, bytes]], int, int, tuple[int, int] | None, bool]: ...
 def build_full_response_v2(
     file_path: str,
     stat_cache: StatCache,
@@ -92,11 +91,11 @@ def build_full_response_v2(
     immutable_pattern: str,
     security_enabled: bool,
     cors_enabled: bool,
-    range_header: Optional[str],
+    range_header: str | None,
     method: str,
-    if_none_match: Optional[str],
-    if_modified_since: Optional[str],
-    is_hashed_override: Optional[bool] = None,
+    if_none_match: str | None,
+    if_modified_since: str | None,
+    is_hashed_override: bool | None = None,
     add_vary: bool = True,
 ) -> tuple[
     str,
@@ -105,5 +104,5 @@ def build_full_response_v2(
     int,
     tuple[int, int] | None,
     bool,
-    Optional[str],
+    str | None,
 ]: ...

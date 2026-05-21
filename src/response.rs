@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 use pyo3::prelude::*;
 
 use crate::cache::StatCache;
@@ -12,8 +14,7 @@ pub fn compute_etag(size: i64, mtime_ns: i64) -> String {
 #[pyfunction]
 pub fn format_last_modified(mtime_ns: i64) -> String {
     let secs = mtime_ns / 1_000_000_000;
-    let dt = chrono::DateTime::from_timestamp(secs, 0)
-        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+    let dt = chrono::DateTime::from_timestamp(secs, 0).unwrap_or(chrono::DateTime::UNIX_EPOCH);
     dt.format("%a, %d %b %Y %H:%M:%S GMT").to_string()
 }
 
@@ -61,9 +62,7 @@ pub fn parse_range(range_header: &str, file_size: i64) -> Option<(i64, i64)> {
     if !range_val.contains('-') {
         return None;
     }
-    let mut parts = range_val.splitn(2, '-');
-    let start_str = parts.next()?;
-    let end_str = parts.next()?;
+    let (start_str, end_str) = range_val.split_once('-')?;
 
     if start_str.is_empty() {
         let n: i64 = end_str.parse().ok()?;
@@ -145,7 +144,10 @@ pub fn build_all_headers(
     let mut headers: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(8);
 
     headers.push((b"content-type".to_vec(), content_type.as_bytes().to_vec()));
-    headers.push((b"content-length".to_vec(), content_length.to_string().into_bytes()));
+    headers.push((
+        b"content-length".to_vec(),
+        content_length.to_string().into_bytes(),
+    ));
     headers.push((b"etag".to_vec(), etag.as_bytes().to_vec()));
     headers.push((b"last-modified".to_vec(), last_modified.as_bytes().to_vec()));
     headers.push((b"cache-control".to_vec(), cache_control.as_bytes().to_vec()));
@@ -183,32 +185,6 @@ pub fn build_all_headers(
     (headers, status, final_length, range_spec)
 }
 
-fn parse_accept_encoding_inner(header: &str) -> Vec<String> {
-    let mut entries: Vec<(f64, String)> = Vec::new();
-    for part in header.split(',') {
-        let part = part.trim();
-        if part.is_empty() {
-            continue;
-        }
-        let mut q = 1.0;
-        if let Some(semicolon_pos) = part.find(';') {
-            let token = part[..semicolon_pos].trim().to_lowercase();
-            for param in part[semicolon_pos + 1..].split(';') {
-                if let Some(q_val) = param.trim().strip_prefix("q=") {
-                    if let Ok(v) = q_val.parse::<f64>() {
-                        q = v;
-                    }
-                }
-            }
-            entries.push((q, token));
-        } else {
-            entries.push((q, part.to_lowercase()));
-        }
-    }
-    entries.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    entries.into_iter().map(|(_, t)| t).collect()
-}
-
 fn mime_type(ext: &str) -> &'static str {
     match ext {
         ".html" | ".htm" => "text/html",
@@ -243,10 +219,7 @@ fn guess_content_type_inner(file_path: &str, charset: &str) -> String {
         })
         .unwrap_or_default();
     let mime = mime_type(&ext);
-    if mime.starts_with("text/")
-        || mime == "application/json"
-        || mime == "application/javascript"
-    {
+    if mime.starts_with("text/") || mime == "application/json" || mime == "application/javascript" {
         format!("{}; charset={}", mime, charset)
     } else {
         mime.to_string()
@@ -337,8 +310,7 @@ pub fn build_full_response(
 ) -> (Vec<(Vec<u8>, Vec<u8>)>, u16, i64, Option<(i64, i64)>, bool) {
     let etag = format!("\"{:x}-{:x}\"", mtime_ns, file_size);
     let secs = mtime_ns / 1_000_000_000;
-    let dt = chrono::DateTime::from_timestamp(secs, 0)
-        .unwrap_or(chrono::DateTime::UNIX_EPOCH);
+    let dt = chrono::DateTime::from_timestamp(secs, 0).unwrap_or(chrono::DateTime::UNIX_EPOCH);
     let last_modified = dt.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
     let is_hashed = is_hashed_file_cached(filename, immutable_pattern);
     let cache_control = if is_hashed {
@@ -392,7 +364,10 @@ pub fn build_full_response(
     // Build full response headers
     let mut headers: Vec<(Vec<u8>, Vec<u8>)> = Vec::with_capacity(8);
     headers.push((b"content-type".to_vec(), content_type.as_bytes().to_vec()));
-    headers.push((b"content-length".to_vec(), file_size.to_string().into_bytes()));
+    headers.push((
+        b"content-length".to_vec(),
+        file_size.to_string().into_bytes(),
+    ));
     headers.push((b"etag".to_vec(), etag.as_bytes().to_vec()));
     headers.push((b"last-modified".to_vec(), last_modified.as_bytes().to_vec()));
     headers.push((b"cache-control".to_vec(), cache_control.as_bytes().to_vec()));
@@ -477,15 +452,11 @@ pub fn build_full_response_v2(
     bool,
     Option<String>,
 )> {
-    let (serve_path, content_encoding) = match file_handler::find_compressed(
-        file_path,
-        accept_encoding,
-        allow_brotli,
-        allow_gzip,
-    ) {
-        Some((p, e)) => (p, Some(e)),
-        None => (file_path.to_string(), None),
-    };
+    let (serve_path, content_encoding) =
+        match file_handler::find_compressed(file_path, accept_encoding, allow_brotli, allow_gzip) {
+            Some((p, e)) => (p, Some(e)),
+            None => (file_path.to_string(), None),
+        };
 
     let cached = stat_cache.borrow_mut().get(&serve_path);
     let (file_size, mtime_ns) = match cached {
@@ -578,9 +549,7 @@ fn parse_range_inner(range_header: &str, file_size: i64) -> Option<(i64, i64)> {
     if !range_val.contains('-') {
         return None;
     }
-    let mut parts = range_val.splitn(2, '-');
-    let start_str = parts.next()?;
-    let end_str = parts.next()?;
+    let (start_str, end_str) = range_val.split_once('-')?;
 
     if start_str.is_empty() {
         let n: i64 = end_str.parse().ok()?;
