@@ -42,7 +42,7 @@ environment = { PATH = "$HOME/.cargo/bin:$PATH" }
 [tool.cibuildwheel.macos]
 # Build both Intel and Apple Silicon from a single runner via cross-compilation
 archs = ["x86_64", "arm64"]
-environment = { MACOSX_DEPLOYMENT_TARGET = "10.9" }
+environment = { MACOSX_DEPLOYMENT_TARGET = "10.12" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
