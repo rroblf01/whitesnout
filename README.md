@@ -187,7 +187,8 @@ See [CHANGELOG.md](CHANGELOG.md) for the full release history.
 ## ROADMAP
 
 ```
-v0.1.0 ─── Published (current)
+v0.2.0 ─── Ruff + Ty + type safety (current)
+v0.1.0 ─── Published
    │
    ├─ v0.2.0  Ruff + Ty + type safety
    ├─ v0.3.0  Range Requests + Security headers + Accept-Encoding quality values

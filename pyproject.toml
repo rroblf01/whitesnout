@@ -1,6 +1,6 @@
 [project]
 name = "whitesnout"
-version = "0.1.0"
+version = "0.2.0"
 description = "ASGI static file server — like Whitenoise, but for ASGI"
 readme = "README.md"
 authors = [
