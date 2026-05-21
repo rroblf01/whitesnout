@@ -1,14 +1,20 @@
 # Changelog
 
-## 0.5.0-dev (unreleased)
+## 1.0.0-dev (unreleased)
 
 ### Planned
 
-- **CORS** — Opt-in `cors=True` config adds `Access-Control-Allow-Origin: *` headers
-- **Logging** — Basic request logging (method, path, status, bytes, duration)
-- **Cache invalidation** — Programmatic `invalidate_cache()` method on `WhiteSnout`
+- **Environment variables** — `WHITESNOUT_DIRECTORY`, `WHITESNOUT_CACHE_MAX_AGE`, etc.
+- **Async file IO** — Migrate `iter_chunks` to `anyio` or `aiofiles` to avoid blocking the event loop
 
-## 0.4.0 (2026-05-21)
+## 0.5.0 (2026-05-21)
+
+### Added
+
+- **CORS** — opt-in `cors=True` config adds `Access-Control-Allow-Origin: *` to all responses; handles OPTIONS preflight with 204
+- **Logging** — request logging via `logging.getLogger("whitesnout")` logs method, path, status, bytes, and duration
+- **Cache invalidation** — `WhiteSnout.invalidate_cache()` method to purge the stat cache programmatically
+- **Tests** — 5 new tests covering CORS headers, preflight, disabled defaults, cache invalidation, and logging
 
 ### Added
 
