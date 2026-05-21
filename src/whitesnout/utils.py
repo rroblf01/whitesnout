@@ -34,6 +34,6 @@ def guess_content_type(path: str, charset: str = "utf-8") -> str:
     import os
     _ext = os.path.splitext(path)[1].lower()
     mime = MIME_TYPES.get(_ext, "application/octet-stream")
-    if mime.startswith("text/") or mime == "application/json":
+    if mime.startswith("text/") or mime in ("application/json", "application/javascript", "application/xml"):
         mime = f"{mime}; charset={charset}"
     return mime

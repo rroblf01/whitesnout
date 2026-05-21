@@ -104,6 +104,20 @@ async def test_method_not_allowed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_content_type_css(client: ASGITestClient) -> None:
+    resp = await client.get("/css/style.css")
+    assert resp["status"] == 200
+    assert resp["headers"][b"content-type"] == b"text/css; charset=utf-8"
+
+
+@pytest.mark.asyncio
+async def test_content_type_html(client: ASGITestClient) -> None:
+    resp = await client.get("/subdir/test.html")
+    assert resp["status"] == 200
+    assert resp["headers"][b"content-type"] == b"text/html; charset=utf-8"
+
+
+@pytest.mark.asyncio
 async def test_passes_to_inner_app_when_not_found() -> None:
     inner_response = {"called": False}
 
