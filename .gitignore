@@ -12,3 +12,5 @@ wheels/
 # Rust build artifacts
 target/
 *.abi3.so
+
+.coverage

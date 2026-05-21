@@ -43,6 +43,7 @@ _ENV_PARSERS = {
     "manifest_path": str,
     "autocompress": _bool,
     "autocompress_max_size": int,
+    "autorefresh": _bool,
 }
 
 
@@ -85,6 +86,8 @@ class Config:
         "autocompress",
         "autocompress_max_size",
         "on_request",
+        "autorefresh",
+        "path_resolver",
     )
 
     def __init__(
@@ -117,6 +120,8 @@ class Config:
         autocompress: bool | None = None,
         autocompress_max_size: int | None = None,
         on_request: Callable | None = None,
+        autorefresh: bool | None = None,
+        path_resolver: Callable | None = None,
     ) -> None:
         env = _read_env()
 
@@ -226,3 +231,9 @@ class Config:
             else env.get("autocompress_max_size", 1_048_576)
         )
         self.on_request = on_request
+        self.autorefresh = (
+            autorefresh
+            if autorefresh is not None
+            else env.get("autorefresh", False)
+        )
+        self.path_resolver = path_resolver

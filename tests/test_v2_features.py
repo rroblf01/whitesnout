@@ -266,3 +266,63 @@ def test_env_hsts(monkeypatch: pytest.MonkeyPatch) -> None:
 
     c = Config()
     assert c.hsts == "max-age=63072000"
+
+
+# ---------- Autorefresh + path_resolver ----------
+
+async def test_autorefresh_picks_up_new_file(tmp_path: Path) -> None:
+    (tmp_path / "a.css").write_text("v1")
+    app = WhiteSnout(directory=str(tmp_path), autorefresh=True)
+    client = ASGITestClient(app)
+
+    r1 = await client.get("/a.css")
+    assert r1["body"] == b"v1"
+
+    (tmp_path / "a.css").write_text("v2-different-length")
+    r2 = await client.get("/a.css")
+    assert r2["body"] == b"v2-different-length"
+
+
+async def test_autorefresh_off_caches_old_content(tmp_path: Path) -> None:
+    (tmp_path / "a.css").write_text("v1-content")
+    app = WhiteSnout(directory=str(tmp_path), autorefresh=False)
+    client = ASGITestClient(app)
+
+    r1 = await client.get("/a.css")
+    assert r1["body"] == b"v1-content"
+
+    # Overwrite with shorter content — stat cache still holds old size,
+    # so the body length will not match.
+    (tmp_path / "a.css").write_text("shorter")
+    r2 = await client.get("/a.css")
+    # Cached size is 10, new file is 7; we still report content-length 10
+    assert int(r2["headers"][b"content-length"]) == 10
+
+
+async def test_path_resolver_falls_back_when_directory_misses(
+    tmp_path: Path,
+) -> None:
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "extra.txt").write_text("found via resolver")
+
+    def resolver(path: str) -> Path | None:
+        if path == "/extra.txt":
+            return other / "extra.txt"
+        return None
+
+    app = WhiteSnout(directory=str(tmp_path), path_resolver=resolver)
+    client = ASGITestClient(app)
+    r = await client.get("/extra.txt")
+    assert r["status"] == 200
+    assert r["body"] == b"found via resolver"
+
+
+async def test_path_resolver_returning_none_yields_404(tmp_path: Path) -> None:
+    def resolver(path: str) -> Path | None:
+        return None
+
+    app = WhiteSnout(directory=str(tmp_path), path_resolver=resolver)
+    client = ASGITestClient(app)
+    r = await client.get("/nope.txt")
+    assert r["status"] == 404

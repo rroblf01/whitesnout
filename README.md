@@ -1,5 +1,11 @@
 # whitesnout
 
+[![tests](https://github.com/rrobles-qdq/whitesnout/actions/workflows/test.yml/badge.svg)](https://github.com/rrobles-qdq/whitesnout/actions/workflows/test.yml)
+[![PyPI](https://img.shields.io/pypi/v/whitesnout.svg)](https://pypi.org/project/whitesnout/)
+[![Python versions](https://img.shields.io/pypi/pyversions/whitesnout.svg)](https://pypi.org/project/whitesnout/)
+[![codecov](https://codecov.io/gh/rrobles-qdq/whitesnout/branch/main/graph/badge.svg)](https://codecov.io/gh/rrobles-qdq/whitesnout)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **WhiteSnout** is an ASGI static file server for Python — like Whitenoise, but built for ASGI frameworks (FastAPI, Starlette, Django, etc.). It serves static files with minimal memory overhead, streaming content in chunks and leveraging pre-compressed assets. A Rust extension (PyO3) accelerates the hot path transparently.
 
 ---
@@ -136,6 +142,8 @@ All options can be passed as keyword arguments to `WhiteSnout`:
 | `autocompress` | `False` | On-the-fly gzip/brotli compression with in-memory LRU cache (per-process) |
 | `autocompress_max_size` | `1_048_576` | Skip on-the-fly compression for files larger than this (bytes) |
 | `on_request` | `None` | Callable (sync or async) invoked after every served request with a dict of metadata |
+| `autorefresh` | `False` | Clear path and stat caches on every request (dev mode); auto-enabled by the Django wrapper when `settings.DEBUG` is True |
+| `path_resolver` | `None` | Optional callable `(path: str) -> Path \| None` called when the standard resolution misses; used by the Django integration to plug `staticfiles.finders` |
 | `error_responses` | `{404: b"Not Found", 405: b"Method Not Allowed", 416: b"Range Not Satisfiable"}` | Customize response bodies for error status codes; `{}` for empty bodies |
 | `log_level` | `"INFO"` | Logging level (`"DEBUG"`, `"INFO"`, `"WARNING"`, etc.); `None` disables logging entirely |
 
@@ -360,7 +368,9 @@ Async callables are awaited; exceptions raised by the hook are logged and swallo
 
 ## Django integration
 
-For `asgi.py` deployments:
+> Whitesnout is ASGI-native, so the Django integration only supports Django ASGI deployments (the `asgi.py` pattern). For Django WSGI / classic `runserver`, keep using `whitenoise`.
+
+### `asgi.py` wrapper
 
 ```python
 # asgi.py
@@ -376,9 +386,10 @@ application = get_static_application()
 
 `get_static_application()` reads:
 
-- `STATIC_ROOT` → `directory`
-- `STATIC_URL` → mount prefix when non-trivial
-- `STATICFILES_STORAGE` → if a Manifest storage is configured, hooks `static/staticfiles.json` automatically
+- `STATIC_ROOT`         → `directory`
+- `STATIC_URL`          → mount prefix when not `/static/`
+- `STATICFILES_STORAGE` *or* `STORAGES["staticfiles"]["BACKEND"]` → if a Manifest storage is configured, hooks `static/staticfiles.json` automatically
+- `DEBUG`               → if True and `autorefresh` is unset, enables `autorefresh=True`
 
 Pass overrides through to `WhiteSnout`:
 
@@ -388,6 +399,50 @@ application = get_static_application(
     cors_allow_origins=["https://app.example.com"],
 )
 ```
+
+### Development without `collectstatic`
+
+```python
+application = get_static_application(use_finders=True, autorefresh=True)
+```
+
+`use_finders=True` wires a `path_resolver` that calls `django.contrib.staticfiles.finders.find()` for every request that misses `STATIC_ROOT`. Combined with `autorefresh=True`, every request re-resolves and re-stats the file so edits show up immediately. Both options are typically gated by `settings.DEBUG`.
+
+### `collectstatic` with compression in one step
+
+Replace Django's default storage with whitesnout's compressed manifest storage to emit `.gz` + `.br` siblings during `manage.py collectstatic`. No separate build step needed.
+
+```python
+# settings.py (Django 4.2+)
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": "whitesnout.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+# Django < 4.2
+STATICFILES_STORAGE = "whitesnout.storage.CompressedManifestStaticFilesStorage"
+```
+
+Two variants are shipped:
+
+- `whitesnout.storage.CompressedStaticFilesStorage` — no hashing, just gzip/brotli siblings
+- `whitesnout.storage.CompressedManifestStaticFilesStorage` — Django's `ManifestStaticFilesStorage` + gzip/brotli (recommended for production)
+
+Brotli output requires `whitesnout[compress]` installed in the build environment.
+
+---
+
+## Examples
+
+End-to-end deployments live in [`examples/`](examples/):
+
+- [`fastapi-spa/`](examples/fastapi-spa/) — FastAPI + Vite SPA with manifest, SPA fallback, hardened headers, autocompress
+- [`django-asgi/`](examples/django-asgi/) — Django ASGI with `get_static_application()` + `CompressedManifestStaticFilesStorage` + dev mode (`use_finders` / `autorefresh`)
+- [`starlette/`](examples/starlette/) — Starlette + multi-directory mount + `add_files` overrides + `on_request` observability hook
+
+Each example is self-contained — `cd` in, install requirements, `uvicorn` to run.
 
 ---
 
@@ -400,7 +455,9 @@ application = get_static_application(
 | `WHITENOISE_MAX_AGE` | `cache_max_age=` |
 | `WHITENOISE_IMMUTABLE_FILE_TEST` | `immutable_pattern=` + `manifest_path=` |
 | `WHITENOISE_ALLOW_ALL_ORIGINS` | `cors_allow_origins=["*"]` (or `cors=True`) |
-| `WHITENOISE_AUTOREFRESH` | Call `app.invalidate_cache()` after deploys; or use lower `max_cache_size` |
+| `WHITENOISE_AUTOREFRESH` | `autorefresh=True` (auto-enabled by `whitesnout.django.get_static_application()` when `settings.DEBUG` is True) |
+| `WHITENOISE_USE_FINDERS` | `get_static_application(use_finders=True)` |
+| `CompressedManifestStaticFilesStorage` | `whitesnout.storage.CompressedManifestStaticFilesStorage` |
 | `WHITENOISE_MIMETYPES` | `mime_types={...}` |
 | `WHITENOISE_ADD_HEADERS_FUNCTION` | `on_request=callable` for observability; use `mime_types` + the security-header configs for static additions |
 | `WHITENOISE_KEEP_ONLY_HASHED_FILES` | Handled by Django's `STATICFILES_STORAGE`; whitesnout reads the resulting manifest |
@@ -425,9 +482,15 @@ whitesnout/
 ├── compress.py          # Compression logic
 ├── manifest.py          # Django/Webpack/Vite manifest loader
 ├── autocompress.py      # In-memory LRU + gzip/brotli on-the-fly
-├── django.py            # Django ASGI integration
+├── django.py            # Django ASGI integration (get_static_application)
+├── storage.py           # Django staticfiles storage backend (collectstatic + compress)
 ├── _rs.pyi              # Type stubs for the Rust extension
 └── py.typed
+
+examples/
+├── fastapi-spa/         # FastAPI + Vite SPA
+├── django-asgi/         # Django ASGI + collectstatic compress storage
+└── starlette/           # Multi-directory + observability hook
 
 whitesnout._rs           # Compiled Rust extension (PyO3)
 ├── LRUCache             # Generic LRU cache (O(1) via `lru` crate)
@@ -491,13 +554,22 @@ Results measured with `benchmarks/benchmark.py` (median of 15 runs) — 500 requ
 >
 > Both servers run behind uvicorn for an apples-to-apples comparison. Whitenoise is WSGI-only, so it goes through `a2wsgi.WSGIMiddleware`; whitesnout speaks ASGI natively. Variance is ±10% on busy machines.
 
+### nginx baseline (ceiling reference)
+
+Both whitesnout and whitenoise are Python ASGI/WSGI servers — they cap out at roughly Python's request-handling rate. For honest context, run the nginx baseline (single-worker, sendfile-enabled) on the same machine:
+
+```console
+$ uv run python benchmarks/benchmark_nginx.py
+```
+
+nginx will typically land in the 10–20k RPS range on the same workload. Use it as a "what's the hardware ceiling?" reference, not a peer comparison — whitesnout's value is being part of your Python application process, not replacing a CDN edge.
+
 ### Running yourself
 
 ```console
-$ uv run python benchmarks/benchmark.py
+$ uv run python benchmarks/benchmark.py          # whitesnout vs whitenoise
+$ uv run python benchmarks/benchmark_nginx.py    # nginx ceiling (requires nginx on PATH)
 ```
-
----
 
 ---
 

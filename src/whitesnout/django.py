@@ -1,25 +1,26 @@
 """Django integration for whitesnout.
 
-Two patterns supported:
+Whitesnout is ASGI-native and so this integration only supports Django ASGI
+deployments. For Django WSGI / classic `runserver` mode, stick with
+`whitenoise`. Whitenoise's middleware works in WSGI because WSGI is a strict
+sync request/response cycle; ASGI's streaming nature makes the equivalent
+middleware pattern brittle, so we expose only the `asgi.py` wrapper.
 
-1. ASGI wrapper for `asgi.py`::
+Typical use::
 
-       # asgi.py
-       from whitesnout.django import get_static_application
-       application = get_static_application()
+    # asgi.py
+    import os
+    import django
 
-2. Manual wiring with the regular `WhiteSnout` class::
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "myproject.settings")
+    django.setup()
 
-       from django.core.asgi import get_asgi_application
-       from whitesnout import WhiteSnout
+    from whitesnout.django import get_static_application
+    application = get_static_application()
 
-       asgi_app = get_asgi_application()
-       application = WhiteSnout(asgi_app, directory=settings.STATIC_ROOT, ...)
+In development, pass ``use_finders=True`` to skip ``collectstatic``::
 
-`get_static_application()` reads Django settings (`STATIC_ROOT`, `STATIC_URL`,
-`STATICFILES_STORAGE`) and wires `WhiteSnout` automatically, including
-Django's `staticfiles.json` manifest when `ManifestStaticFilesStorage` is
-in use.
+    application = get_static_application(use_finders=True, autorefresh=True)
 """
 from __future__ import annotations
 
@@ -31,17 +32,35 @@ from whitesnout.main import WhiteSnout
 
 def get_static_application(
     asgi_app: Any | None = None,
+    *,
+    use_finders: bool = False,
+    autorefresh: bool | None = None,
     **overrides: Any,
 ) -> WhiteSnout:
     """Return a WhiteSnout instance wrapping Django's ASGI application.
 
     Reads Django settings (must be configured before this call):
 
-    - ``STATIC_ROOT``           → ``directory``
-    - ``STATIC_URL``            → used as prefix for `add_directory` if non-empty
-    - ``STATICFILES_STORAGE``   → if it's a manifest storage, hooks the manifest
+    - ``STATIC_ROOT``         → ``directory``
+    - ``STATIC_URL``          → mount prefix when non-trivial
+    - ``STATICFILES_STORAGE`` → if a manifest storage is configured, hooks
+      ``static/staticfiles.json`` automatically
+    - ``DEBUG``               → if True and ``autorefresh`` is unset, enables
+      ``autorefresh=True``
 
-    Any keyword overrides are passed through to ``WhiteSnout``.
+    Parameters
+    ----------
+    asgi_app
+        The inner ASGI application. Defaults to Django's
+        ``get_asgi_application()``.
+    use_finders
+        Resolve missing files via ``django.contrib.staticfiles.finders.find``
+        so ``collectstatic`` is not required during development.
+    autorefresh
+        Clear the path and stat caches on every request. Default: follow
+        ``settings.DEBUG``.
+    **overrides
+        Forwarded to :class:`whitesnout.main.WhiteSnout`.
     """
     from django.conf import settings
     from django.core.asgi import get_asgi_application
@@ -50,92 +69,80 @@ def get_static_application(
         asgi_app = get_asgi_application()
 
     static_root = getattr(settings, "STATIC_ROOT", None)
-    if not static_root:
-        raise RuntimeError(
-            "settings.STATIC_ROOT is not configured; run `manage.py "
-            "collectstatic` first or set STATIC_ROOT in settings."
-        )
-
-    static_url = getattr(settings, "STATIC_URL", "/static/") or "/static/"
+    static_url = (getattr(settings, "STATIC_URL", "/static/") or "/static/")
     if not static_url.startswith("/"):
         static_url = "/" + static_url
     if not static_url.endswith("/"):
         static_url = static_url + "/"
 
-    manifest_path: str | None = None
-    storage = getattr(settings, "STATICFILES_STORAGE", "") or ""
-    if "Manifest" in storage:
-        candidate = Path(static_root) / "staticfiles.json"
-        if candidate.is_file():
-            manifest_path = str(candidate)
+    if not static_root and not use_finders:
+        raise RuntimeError(
+            "settings.STATIC_ROOT is not configured; run `manage.py "
+            "collectstatic` first, set STATIC_ROOT in settings, or pass "
+            "use_finders=True for development mode."
+        )
+
+    if autorefresh is None:
+        autorefresh = bool(getattr(settings, "DEBUG", False))
+
+    manifest_path: str | None = _django_manifest_path()
 
     kwargs: dict[str, Any] = {
-        "directory": str(static_root),
+        "directory": str(static_root) if static_root else ".",
         "manifest_path": manifest_path,
+        "autorefresh": autorefresh,
     }
+
+    if use_finders:
+        kwargs["path_resolver"] = _build_finders_resolver(static_url)
+
     kwargs.update(overrides)
 
     snout = WhiteSnout(asgi_app, **kwargs)
 
-    # Mount STATIC_URL prefix when it's not the root
-    if static_url not in ("/", "/static/"):
+    # Mount STATIC_URL prefix when it isn't `/static/` (the implicit default
+    # WhiteSnout uses when serving from `directory`).
+    if static_root and static_url not in ("/", "/static/"):
         snout.add_directory(static_url.rstrip("/"), str(static_root))
 
     return snout
 
 
-class WhiteSnoutMiddleware:
-    """ASGI middleware factory for Django's MIDDLEWARE list.
-
-    Use with ``django.urls`` ASGI deployments. Place near the top of the
-    MIDDLEWARE list — static files should be served before authentication
-    or session middleware runs.
-
-    Example::
-
-        MIDDLEWARE = [
-            "whitesnout.django.WhiteSnoutMiddleware",
-            ...
-        ]
+def _build_finders_resolver(static_url: str):
+    """Return a callable that resolves a request path to a file via Django's
+    staticfiles finders. Used in development to avoid running collectstatic.
     """
+    prefix = static_url
+    prefix_len = len(prefix)
 
-    async_capable = True
-    sync_capable = False
+    def resolve(path: str) -> Path | None:
+        if not path.startswith(prefix):
+            return None
+        relative = path[prefix_len:]
+        if not relative:
+            return None
+        from django.contrib.staticfiles.finders import find
 
-    def __init__(self, get_response: Any) -> None:
-        from django.conf import settings
+        found = find(relative)
+        if found:
+            return Path(found)
+        return None
 
-        self.get_response = get_response
-        self._snout = WhiteSnout(
-            directory=getattr(settings, "STATIC_ROOT", "static"),
-            manifest_path=_django_manifest_path(),
-        )
-
-    async def __call__(self, request: Any) -> Any:
-        # Static-file paths flow through WhiteSnout's ASGI interface; everything
-        # else falls back to the regular Django response pipeline.
-        from django.conf import settings
-
-        static_url = (getattr(settings, "STATIC_URL", "/static/") or "/static/").rstrip(
-            "/"
-        ) + "/"
-        if request.path.startswith(static_url):
-            # Build a minimal ASGI scope-compatible call. Production-grade
-            # users should prefer the ASGI wrapper get_static_application().
-            from django.http import HttpResponse
-
-            return HttpResponse(
-                "WhiteSnoutMiddleware: use get_static_application() in asgi.py "
-                "for production. Direct middleware mode is informational.",
-                status=501,
-            )
-        return await self.get_response(request)
+    return resolve
 
 
 def _django_manifest_path() -> str | None:
     from django.conf import settings
 
     storage = getattr(settings, "STATICFILES_STORAGE", "") or ""
+    storages = getattr(settings, "STORAGES", None)
+    if storages and isinstance(storages, dict):
+        staticfiles = storages.get("staticfiles", {})
+        if isinstance(staticfiles, dict):
+            backend = staticfiles.get("BACKEND", "") or ""
+            if "Manifest" in backend:
+                storage = backend
+
     if "Manifest" not in storage:
         return None
     static_root = getattr(settings, "STATIC_ROOT", None)

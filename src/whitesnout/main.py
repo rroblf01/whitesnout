@@ -211,6 +211,8 @@ class WhiteSnout:
         autocompress: bool | None = None,
         autocompress_max_size: int | None = None,
         on_request: Callable | None = None,
+        autorefresh: bool | None = None,
+        path_resolver: Callable | None = None,
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -240,6 +242,8 @@ class WhiteSnout:
             autocompress=autocompress,
             autocompress_max_size=autocompress_max_size,
             on_request=on_request,
+            autorefresh=autorefresh,
+            path_resolver=path_resolver,
         )
         self._app = app
         self._stat_cache: StatCache = StatCache(
@@ -391,6 +395,12 @@ class WhiteSnout:
 
         path = scope["path"]
 
+        # Autorefresh: nuke caches so a moved/edited file is picked up on the
+        # next request. Cheap (HashMap clear); intended for dev only.
+        if config.autorefresh:
+            self._path_cache.clear()
+            self._stat_cache.clear()
+
         cached = self._path_cache.get(path)
         if cached is not None:
             file_path = cached
@@ -398,7 +408,10 @@ class WhiteSnout:
             file_path = _resolve_requested_path(
                 config, path, self._extra_files, self._extra_dirs
             )
-            self._path_cache.put(path, file_path)
+            if file_path is None and config.path_resolver is not None:
+                file_path = await asyncio.to_thread(config.path_resolver, path)
+            if not config.autorefresh:
+                self._path_cache.put(path, file_path)
 
         if file_path is None:
             dir_path = _resolve_directory_path(config, path, self._extra_dirs)

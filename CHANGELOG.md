@@ -1,5 +1,36 @@
 # Changelog
 
+## 2.0.1 (2026-05-21) — Django integration polish + ecosystem
+
+### Added
+
+- **`autorefresh` config** — clear path and stat caches on every request. Intended for development. Auto-enabled by `whitesnout.django.get_static_application()` when `settings.DEBUG` is True.
+- **`path_resolver` config** — optional callable invoked after the standard resolution misses, before returning 404. Used by the Django integration to plug `staticfiles.finders`.
+- **`use_finders=True`** — `get_static_application(use_finders=True)` resolves missing files via `django.contrib.staticfiles.finders.find()`, removing the `collectstatic` requirement during development.
+- **`whitesnout.storage`** — Django `STATICFILES_STORAGE` backends:
+  - `CompressedStaticFilesStorage` — plain static files + gzip/brotli siblings
+  - `CompressedManifestStaticFilesStorage` — Django's `ManifestStaticFilesStorage` + gzip/brotli
+- **Django manifest detection via `STORAGES["staticfiles"]["BACKEND"]`** — supports Django 4.2+ storages dict, with the legacy `STATICFILES_STORAGE` setting still honored.
+- **Examples directory** — three end-to-end deployments under `examples/`:
+  - `examples/fastapi-spa/` — FastAPI + Vite SPA
+  - `examples/django-asgi/` — Django ASGI + compressed manifest storage
+  - `examples/starlette/` — Starlette + multi-directory + observability hook
+- **nginx baseline benchmark** — `benchmarks/benchmark_nginx.py` runs nginx single-worker against the same workload to give an honest hardware-ceiling reference.
+- **PyPI metadata** — classifiers (Framework :: Django/FastAPI, Programming Language :: Rust, Topic :: HTTP Servers, ...), project URLs (Homepage/Docs/Repo/Changelog/Issues), license, and an expanded keyword list.
+- **Coverage** — `pytest-cov>=7.0` added to dev deps; `[tool.coverage]` config drives branch coverage with sensible exclusions; CI uploads to Codecov on the ubuntu/py3.14 leg.
+
+### Changed
+
+- **`whitesnout.django`** — dropped the half-baked `WhiteSnoutMiddleware` class. Whitesnout is ASGI-only; Django ASGI users should use `get_static_application()` from `asgi.py`. Django WSGI users should stick with whitenoise.
+- **`get_static_application()` signature** — added keyword-only `use_finders: bool = False` and `autorefresh: bool | None = None`.
+- **CI test matrix** — now Python 3.10–3.14 × Linux/macOS/Windows (was: Linux × all + py3.14 macOS/Windows). Lint and `cargo clippy --all-targets -D warnings` jobs split into dedicated workflows.
+
+### Internal
+
+- New tests: `tests/test_django.py` — 9 cases covering finder resolution, manifest detection via legacy + STORAGES dict, autorefresh defaulting, mount prefix handling, and compressed storage backends.
+- 4 new tests for autorefresh + path_resolver in `tests/test_v2_features.py`.
+- Total tests: 128 (was 115).
+
 ## 2.0.0 (2026-05-21) — Performance, hardening, ecosystem
 
 ### Highlights
