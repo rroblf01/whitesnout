@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
+from whitesnout.autocompress import (
+    CompressedCache,
+    compress_bytes,
+    pick_encoding,
+    should_autocompress,
+)
 from whitesnout.cache import LRUCache, StatCache
 from whitesnout.config import Config
 from whitesnout.file_handler import (
@@ -12,6 +20,7 @@ from whitesnout.file_handler import (
     resolve_index,
     sanitize_path,
 )
+from whitesnout.manifest import load_manifest
 from whitesnout.response import (
     build_headers,
     build_response_pipeline,
@@ -51,6 +60,66 @@ def _log_request(method: str, path: str, status: int, length: int, t0: float) ->
 
 def _cors_headers() -> list[tuple[bytes, bytes]]:
     return [(b"access-control-allow-origin", b"*")]
+
+
+def _build_extra_headers(config: Config) -> list[tuple[bytes, bytes]]:
+    """Pre-compute config-driven response headers that don't vary per request."""
+    extra: list[tuple[bytes, bytes]] = []
+    if config.hsts:
+        extra.append((b"strict-transport-security", config.hsts.encode()))
+    if config.csp:
+        extra.append((b"content-security-policy", config.csp.encode()))
+    if config.referrer_policy:
+        extra.append((b"referrer-policy", config.referrer_policy.encode()))
+    if config.permissions_policy:
+        extra.append((b"permissions-policy", config.permissions_policy.encode()))
+    return extra
+
+
+def _resolve_cors_origin(
+    allow_origins: list[str], request_origin: str | None
+) -> bytes | None:
+    """Return the Access-Control-Allow-Origin value for this request, or None."""
+    if not allow_origins:
+        return None
+    if "*" in allow_origins and not request_origin:
+        return b"*"
+    if request_origin is None:
+        return None
+    if "*" in allow_origins:
+        return request_origin.encode()
+    if request_origin in allow_origins:
+        return request_origin.encode()
+    return None
+
+
+def _patch_content_length(
+    headers: list[tuple[bytes, bytes]], new_length: int
+) -> None:
+    new_val = str(new_length).encode()
+    for i, (k, _) in enumerate(headers):
+        if k == b"content-length":
+            headers[i] = (b"content-length", new_val)
+            return
+
+
+def _override_content_type(
+    headers: list[tuple[bytes, bytes]], file_path_str: str, mime_types: dict[str, str]
+) -> None:
+    """Replace content-type header when the user provided a custom MIME for this extension."""
+    if not mime_types:
+        return
+    dot = file_path_str.rfind(".")
+    if dot < 0:
+        return
+    ext = file_path_str[dot:].lower()
+    custom = mime_types.get(ext)
+    if custom is None:
+        return
+    for i, (k, _) in enumerate(headers):
+        if k == b"content-type":
+            headers[i] = (b"content-type", custom.encode())
+            return
 
 
 def _resolve_requested_path(
@@ -104,6 +173,11 @@ class WhiteSnout:
         "_extra_files",
         "_extra_dirs",
         "_log_handler",
+        "_extra_response_headers",
+        "_manifest_paths",
+        "_compressed_cache",
+        "_on_request",
+        "_on_request_is_async",
     )
 
     def __init__(
@@ -125,6 +199,18 @@ class WhiteSnout:
         error_responses: dict[int, bytes] | None = None,
         log_level: str | None = "INFO",
         sync_threshold: int | None = None,
+        cors_allow_origins: list[str] | None = None,
+        hsts: str | None = None,
+        csp: str | None = None,
+        referrer_policy: str | None = None,
+        permissions_policy: str | None = None,
+        mime_types: dict[str, str] | None = None,
+        force_text_extensions: set[str] | None = None,
+        skip_compress_extensions: set[str] | None = None,
+        manifest_path: str | None = None,
+        autocompress: bool | None = None,
+        autocompress_max_size: int | None = None,
+        on_request: Callable | None = None,
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -142,6 +228,18 @@ class WhiteSnout:
             error_responses=error_responses,
             log_level=log_level,
             sync_threshold=sync_threshold,
+            cors_allow_origins=cors_allow_origins,
+            hsts=hsts,
+            csp=csp,
+            referrer_policy=referrer_policy,
+            permissions_policy=permissions_policy,
+            mime_types=mime_types,
+            force_text_extensions=force_text_extensions,
+            skip_compress_extensions=skip_compress_extensions,
+            manifest_path=manifest_path,
+            autocompress=autocompress,
+            autocompress_max_size=autocompress_max_size,
+            on_request=on_request,
         )
         self._app = app
         self._stat_cache: StatCache = StatCache(
@@ -154,6 +252,25 @@ class WhiteSnout:
         self._extra_files: dict[str, Path] = {}
         self._extra_dirs: list[tuple[str, Path]] = []
         self._log_handler: logging.Handler | None = None
+
+        self._extra_response_headers = _build_extra_headers(self.config)
+
+        self._manifest_paths: set[str] = (
+            load_manifest(self.config.manifest_path)
+            if self.config.manifest_path
+            else set()
+        )
+
+        self._compressed_cache: CompressedCache | None = (
+            CompressedCache() if self.config.autocompress else None
+        )
+
+        self._on_request = self.config.on_request
+        self._on_request_is_async = (
+            self._on_request is not None
+            and inspect.iscoroutinefunction(self._on_request)
+        )
+
         self._setup_logging()
 
     def _setup_logging(self) -> None:
@@ -240,11 +357,19 @@ class WhiteSnout:
                 )
             return
 
+        # Extract request Origin (used for CORS allowlist) + relevant headers
+        request_origin: str | None = None
+
         # CORS preflight
         if method == "OPTIONS":
-            if config.cors:
-                extra = _cors_headers()
-            else:
+            for name, value in scope.get("headers", []):
+                if name.lower() == b"origin":
+                    request_origin = value.decode()
+                    break
+            allowed = _resolve_cors_origin(
+                config.cors_allow_origins, request_origin
+            )
+            if allowed is None:
                 body = config.error_responses.get(405, b"")
                 await send_response(
                     send,
@@ -253,6 +378,9 @@ class WhiteSnout:
                     body,
                 )
                 return
+            extra = [(b"access-control-allow-origin", allowed)]
+            if "*" not in config.cors_allow_origins:
+                extra.append((b"vary", b"Origin"))
             headers = build_headers(
                 content_type="text/plain; charset=utf-8",
                 content_length=0,
@@ -321,6 +449,7 @@ class WhiteSnout:
         if_none_match: str | None = None
         if_modified_since: str | None = None
         accept_encoding = ""
+        need_origin = bool(config.cors_allow_origins)
         for name, value in scope.get("headers", []):
             low = name.lower()
             if low == b"range":
@@ -331,6 +460,12 @@ class WhiteSnout:
                 if_modified_since = value.decode()
             elif low == b"accept-encoding":
                 accept_encoding = value.decode()
+            elif need_origin and low == b"origin":
+                request_origin = value.decode()
+
+        is_hashed_override: bool | None = (
+            True if self._manifest_paths and path in self._manifest_paths else None
+        )
 
         (
             serve_path,
@@ -339,7 +474,7 @@ class WhiteSnout:
             content_length,
             range_spec,
             is_304,
-            _content_encoding,
+            content_encoding,
         ) = build_response_pipeline(
             file_path,
             self._stat_cache_impl,
@@ -352,12 +487,28 @@ class WhiteSnout:
             immutable_max_age=config.immutable_max_age,
             immutable_pattern=config.immutable_pattern,
             security_enabled=config.security_headers,
-            cors_enabled=config.cors,
+            cors_enabled=False,  # CORS handled in Python post-process
             range_header=range_header,
             method=method,
             if_none_match=if_none_match,
             if_modified_since=if_modified_since,
+            is_hashed_override=is_hashed_override,
+            add_vary=config.brotli or config.gzip,
         )
+
+        # Post-process: extra security headers, CORS allowlist, MIME override
+        if self._extra_response_headers:
+            headers.extend(self._extra_response_headers)
+
+        if config.cors_allow_origins:
+            allowed = _resolve_cors_origin(config.cors_allow_origins, request_origin)
+            if allowed is not None:
+                headers.append((b"access-control-allow-origin", allowed))
+                if "*" not in config.cors_allow_origins:
+                    headers.append((b"vary", b"Origin"))
+
+        if config.mime_types:
+            _override_content_type(headers, str(file_path), config.mime_types)
 
         if is_304:
             await send_response(send, 304, headers)
@@ -382,9 +533,50 @@ class WhiteSnout:
 
         if method == "HEAD":
             await send_response(send, status, headers)
+            if self._on_request is not None:
+                await self._notify_request(scope, status, content_length, t0)
             if log_enabled:
                 _log_request(method, path, status, content_length, t0)
             return
+
+        # Autocompress: serve a freshly compressed in-memory copy when no
+        # pre-compressed variant exists on disk and the file is suitable.
+        if (
+            self._compressed_cache is not None
+            and content_encoding is None
+            and range_spec is None
+            and content_length <= config.autocompress_max_size
+            and should_autocompress(file_path, config.skip_compress_extensions)
+        ):
+            encoding = pick_encoding(accept_encoding, config.brotli, config.gzip)
+            if encoding is not None:
+                compressed_body = await self._get_compressed(
+                    file_path, encoding, content_length
+                )
+                if compressed_body is not None:
+                    _patch_content_length(headers, len(compressed_body))
+                    headers.append((b"content-encoding", encoding.encode()))
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": status,
+                            "headers": headers,
+                        }
+                    )
+                    await send(
+                        {
+                            "type": "http.response.body",
+                            "body": compressed_body,
+                            "more_body": False,
+                        }
+                    )
+                    if self._on_request is not None:
+                        await self._notify_request(
+                            scope, status, len(compressed_body), t0
+                        )
+                    if log_enabled:
+                        _log_request(method, path, status, len(compressed_body), t0)
+                    return
 
         # Fast path: small file fits in one read, single send pair
         if content_length <= config.sync_threshold:
@@ -409,6 +601,8 @@ class WhiteSnout:
                     "more_body": False,
                 }
             )
+            if self._on_request is not None:
+                await self._notify_request(scope, status, content_length, t0)
             if log_enabled:
                 _log_request(method, path, status, content_length, t0)
             return
@@ -445,5 +639,49 @@ class WhiteSnout:
             }
         )
 
+        if self._on_request is not None:
+            await self._notify_request(scope, status, content_length, t0)
         if log_enabled:
             _log_request(method, path, status, content_length, t0)
+
+    async def _notify_request(
+        self, scope: dict, status: int, length: int, t0: float
+    ) -> None:
+        if self._on_request is None:
+            return
+        elapsed = time.perf_counter() - t0
+        info = {
+            "method": scope["method"],
+            "path": scope["path"],
+            "status": status,
+            "length": length,
+            "elapsed_s": elapsed,
+            "scope": scope,
+        }
+        try:
+            if self._on_request_is_async:
+                await self._on_request(info)
+            else:
+                self._on_request(info)
+        except Exception:
+            logger.exception("on_request hook raised")
+
+    async def _get_compressed(
+        self, file_path: Path, encoding: str, content_length: int
+    ) -> bytes | None:
+        assert self._compressed_cache is not None
+        path_str = str(file_path)
+        cached = self._stat_cache_impl.get(path_str)
+        if cached is None:
+            return None
+        _file_size, mtime_ns = cached
+        cached_bytes = self._compressed_cache.get(path_str, mtime_ns, encoding)
+        if cached_bytes is not None:
+            return cached_bytes
+        raw = await asyncio.to_thread(_read_full, file_path)
+        compressed = await asyncio.to_thread(compress_bytes, raw, encoding)
+        if compressed is None or len(compressed) >= content_length:
+            # If compression didn't shrink, skip compression for this file
+            return None
+        self._compressed_cache.put(path_str, mtime_ns, encoding, compressed)
+        return compressed

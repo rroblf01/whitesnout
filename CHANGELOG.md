@@ -1,30 +1,67 @@
 # Changelog
 
-## 2.0.0 (2026-05-21) — Rust Phase 3 + Multiple directories + Error customization
+## 2.0.0 (2026-05-21) — Performance, hardening, ecosystem
 
-### Added
+### Highlights
 
-- **Rust native StatCache** — `StatCache` in `src/cache.rs` stores `(st_size, st_mtime_ns)` as a native struct (no PyObject wrapping). Avoids Python object overhead per stat lookup. Pure Python fallback via `_PyStatCache` when the extension is unavailable
-- **Response module ported to Rust** — `compute_etag`, `format_last_modified`, `build_cache_control`, `security_headers`, `build_headers`, `parse_range`, `build_content_range`, and `check_304` all implemented in `src/response.rs` with automatic Python fallback
-- **Multiple directories** — `add_files(files: dict)` registers individual files at specific paths; `add_directory(prefix, directory)` serves an extra directory under a URL prefix; `remove_files(*paths)` and `remove_directory(prefix)` remove registrations
-- **Configurable error responses** — `error_responses: dict[int, bytes]` parameter allows customizing response bodies for 404, 405, 416, etc. Default keeps backward-compatible messages (`b"Not Found"`, `b"Method Not Allowed"`, `b"Range Not Satisfiable"`). Set to `{}` for empty bodies
-- **Silencable logging** — `log_level: str | None = "INFO"` parameter; pass `None` to disable all logging output
-- **New `error_headers()` function** — replaces `not_found_headers()` / `method_not_allowed_headers()` with a status-aware builder
-- **`chrono` crate** — added for RFC 2822 date parsing in the Rust `check_304` implementation
+- 1 FFI call per request (compressed lookup + stat + headers fused into `build_full_response_v2`)
+- No required Python runtime dependencies (`aiofiles` moved to the `[streaming]` extra)
+- Native Rust StatCache + Rust hot path (multi-arch wheels via cibuildwheel)
+- Whitenoise feature parity: Django integration, manifest support, on-the-fly compression, hardened security headers, CORS allowlist, observability hook
+- 115 tests (was 93)
+
+### Performance
+
+- **Fused Rust pipeline** — `build_full_response_v2` in `src/response.rs` combines `find_compressed`, `stat` (via cache), 304 check, range handling and full header construction into one PyO3 call. Replaces three round-trips per request.
+- **Fast-path send for small files** — files ≤ `sync_threshold` (default 64 KB) bypass the async generator entirely. Single `asyncio.to_thread` read + single `more_body=False` send.
+- **Hand-written matcher for the default immutable pattern** — skips the `regex` engine when `immutable_pattern == r"\.[a-f0-9]{8,}\."`.
+- **Lazy imports** — `aiofiles`, `email.utils`, `re`, `stat` now imported only when needed. Lower resident set at startup.
+- **`Vary: Accept-Encoding`** added automatically when compression is on offer (correctness for HTTP caches).
+
+### Features
+
+- **`autocompress`** — opt-in on-the-fly gzip/brotli compression with bounded in-memory LRU cache (`whitesnout.autocompress`). Caches by `(path, mtime_ns, encoding)`. Honors `skip_compress_extensions` and `autocompress_max_size`.
+- **`manifest_path`** — loader in `whitesnout.manifest` handles Django `ManifestStaticFilesStorage`, Webpack, and Vite manifest shapes. Listed files are served as immutable regardless of regex.
+- **`mime_types`** — dict of extension → MIME type for per-instance overrides (e.g. `.epub`, `.webmanifest`).
+- **`cors_allow_origins`** — list of allowed origins; non-wildcard matches emit `Vary: Origin`. OPTIONS preflight is gated by the allowlist.
+- **`hsts`, `csp`, `referrer_policy`, `permissions_policy`** — config-driven hardening headers.
+- **`on_request`** — sync or async callable invoked after every served request with method, path, status, length, elapsed time, and the raw scope. Exceptions are caught + logged.
+- **`whitesnout.django`** — `get_static_application()` wires Django ASGI + STATIC_ROOT + manifest in one call.
+- **`is_hashed_override`** parameter in the Rust pipeline lets the manifest force-flip cache-control without going through the regex.
+- **Type stubs** — new `_rs.pyi` covers the Rust extension surface for IDE completion.
+- **`skip_compress_extensions`** — set of extensions excluded from on-the-fly compression.
+- **`autocompress_max_size`** — guard against compressing very large files (default 1 MB).
+- **Env vars** — `WHITESNOUT_CORS_ALLOW_ORIGINS`, `WHITESNOUT_HSTS`, `WHITESNOUT_CSP`, `WHITESNOUT_REFERRER_POLICY`, `WHITESNOUT_PERMISSIONS_POLICY`, `WHITESNOUT_FORCE_TEXT_EXTENSIONS`, `WHITESNOUT_SKIP_COMPRESS_EXTENSIONS`, `WHITESNOUT_MANIFEST_PATH`, `WHITESNOUT_AUTOCOMPRESS`, `WHITESNOUT_AUTOCOMPRESS_MAX_SIZE`.
 
 ### Changed
 
-- **`compute_etag()`** — now takes `(size: int, mtime_ns: int)` instead of `os.stat_result`
-- **`format_last_modified()`** — now takes `(mtime_ns: int)` instead of `os.stat_result`
-- **Stat cache** — stores raw `(int, int)` tuples instead of `os.stat_result` objects; lighter memory footprint
-- **Path resolution** — new `_resolve_requested_path()` and `_resolve_directory_path()` helpers handle priority: extra_files → extra_dirs → main directory → inner_app
-- **Logging** — no longer supports `WHITESNOUT_LOG_LEVEL` env var (use the `log_level` constructor kwarg instead); `log_level=None` completely disables logging
-- **Tests** — 24 new tests covering StatCache, error_responses, log_level, add_files/directory, and error_headers (total: 93)
+- **`aiofiles` is now an extra** — install `whitesnout[streaming]` if you serve files larger than `sync_threshold`. Default sync threshold covers the vast majority of static-asset workloads.
+- **Default `cors=True` behavior** — internally translates to `cors_allow_origins=["*"]`. New code should set `cors_allow_origins` directly.
+- **Rust `build_full_response_v2`** — new arguments `is_hashed_override: Option<bool>` and `add_vary: bool`.
+- **StatCache impl reference** cached on `WhiteSnout` to skip one attribute lookup per request.
+- **Scope `method` and `path`** read once, reused locally — fewer dict lookups in the hot path.
+- **Logging** uses `logger.isEnabledFor(INFO)` to skip formatting when disabled.
 
-### Removed
+### Internal
 
-- **`not_found_headers()` and `method_not_allowed_headers()`** — replaced by `error_headers(status, body, error_responses)`
-- **`compute_etag()` / `format_last_modified()` stat-based overloads** — both now accept raw values instead of `os.stat_result`
+- New modules: `whitesnout.manifest`, `whitesnout.autocompress`, `whitesnout.django`.
+- New tests: `tests/test_v2_features.py` — 22 cases covering Vary, CORS allowlist, security headers, MIME overrides, manifest formats, autocompress LRU, observability hooks, env vars.
+- Hand-written hashed-filename matcher in `src/response.rs`.
+
+### Migration notes
+
+- `cors=True` still works but `cors_allow_origins=["..."]` is the recommended form for production.
+- Apps relying on `aiofiles` should install `whitesnout[streaming]`; otherwise iter_chunks falls back to blocking `open()` for files larger than `sync_threshold`.
+- Custom `STATICFILES_STORAGE` users should set `manifest_path` for precise immutable detection — the default regex still works for filenames matching `\.[a-f0-9]{8,}\.`.
+
+### Benchmark
+
+500 requests, 10 concurrent, mixed asset workload (median of 15 runs, bare metal):
+
+| Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
+|---|---|---|---|---|
+| **whitesnout** | **856** | 6.0 | 80.0 | 33.0 |
+| whitenoise | 907 | 5.8 | 81.3 | 31.5 |
 
 ## 1.0.0 (2026-05-21)
 

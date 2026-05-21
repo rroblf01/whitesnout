@@ -469,6 +469,8 @@ def build_response_pipeline(
     method: str,
     if_none_match: str | None,
     if_modified_since: str | None,
+    is_hashed_override: bool | None = None,
+    add_vary: bool = True,
 ) -> tuple[Path, list[tuple[bytes, bytes]], int, int, tuple[int, int] | None, bool, str | None]:
     file_path_str = str(file_path)
     if _RUST_AVAILABLE:
@@ -503,6 +505,8 @@ def build_response_pipeline(
                 method,
                 if_none_match,
                 if_modified_since,
+                is_hashed_override,
+                add_vary,
             )
             serve_path = file_path if serve_path_str == file_path_str else Path(serve_path_str)
             headers: list[tuple[bytes, bytes]] = list(raw_headers)

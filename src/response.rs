@@ -446,6 +446,7 @@ pub fn build_full_response(
     security_enabled, cors_enabled,
     range_header, method,
     if_none_match, if_modified_since,
+    is_hashed_override=None, add_vary=true,
 ))]
 #[allow(clippy::too_many_arguments)]
 pub fn build_full_response_v2(
@@ -465,6 +466,8 @@ pub fn build_full_response_v2(
     method: &str,
     if_none_match: Option<&str>,
     if_modified_since: Option<&str>,
+    is_hashed_override: Option<bool>,
+    add_vary: bool,
 ) -> PyResult<(
     String,
     Vec<(Vec<u8>, Vec<u8>)>,
@@ -503,14 +506,29 @@ pub fn build_full_response_v2(
         }
     };
 
-    let (headers, status, content_length, range_spec, is_304) = build_full_response(
+    // Pick immutable pattern: override > regex > none
+    let effective_pattern = if is_hashed_override == Some(true) {
+        // Force-match by giving a pattern that always matches when filename is used as the test
+        // Use empty filename trick? Cleaner: set pattern to always-match via dot+filename.
+        // Implementation: pass empty pattern + is_hashed flag via separate function.
+        // Workaround: call build_full_response with a pattern that always matches; simpler is to
+        // inline the cache_control choice here. But build_full_response computes its own.
+        // Best: bypass — recompute headers ourselves below if override is Some.
+        ""
+    } else if is_hashed_override == Some(false) {
+        ""
+    } else {
+        immutable_pattern
+    };
+
+    let (mut headers, status, content_length, range_spec, is_304) = build_full_response(
         file_size,
         mtime_ns,
         filename,
         charset,
         cache_max_age,
         immutable_max_age,
-        immutable_pattern,
+        effective_pattern,
         content_encoding.as_deref(),
         security_enabled,
         cors_enabled,
@@ -520,6 +538,26 @@ pub fn build_full_response_v2(
         if_modified_since,
         file_path,
     );
+
+    // Replace cache-control when override is set
+    if let Some(forced_hashed) = is_hashed_override {
+        let new_cc = if forced_hashed {
+            format!("public, immutable, max-age={}", immutable_max_age)
+        } else {
+            format!("public, max-age={}", cache_max_age)
+        };
+        for h in headers.iter_mut() {
+            if h.0 == b"cache-control" {
+                h.1 = new_cc.as_bytes().to_vec();
+                break;
+            }
+        }
+    }
+
+    // Add Vary: Accept-Encoding when compression is on offer
+    if add_vary && (allow_brotli || allow_gzip) {
+        headers.push((b"vary".to_vec(), b"Accept-Encoding".to_vec()));
+    }
 
     Ok((
         serve_path,
