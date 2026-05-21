@@ -1,6 +1,6 @@
 [project]
 name = "whitesnout"
-version = "2.0.1"
+version = "2.0.0"
 description = "ASGI static file server — like Whitenoise, but native ASGI with a Rust hot path"
 readme = "README.md"
 license = { text = "MIT" }
