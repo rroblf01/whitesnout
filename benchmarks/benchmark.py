@@ -64,7 +64,7 @@ def write_whitenoise_script(static_dir: str, port: int) -> str:
     code = textwrap.dedent(f'''\
         import json
         import uvicorn
-        from asgiref.wsgi import WsgiToAsgi
+        from a2wsgi import WSGIMiddleware
         from whitenoise import WhiteNoise
 
         def api(environ, start_response):
@@ -76,7 +76,7 @@ def write_whitenoise_script(static_dir: str, port: int) -> str:
             return [b"Not Found"]
 
         wsgi_app = WhiteNoise(api, root="{static_dir}", index_file=True)
-        asgi = WsgiToAsgi(wsgi_app)
+        asgi = WSGIMiddleware(wsgi_app)
         uvicorn.run(asgi, host="127.0.0.1", port={port}, log_level="error")
     ''')
     path = Path(tempfile.mkdtemp()) / "server_wn.py"

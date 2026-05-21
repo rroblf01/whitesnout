@@ -484,12 +484,12 @@ Results measured with `benchmarks/benchmark.py` (median of 15 runs) — 500 requ
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
 |---|---|---|---|---|
-| **whitesnout** | **856** | 6.0 | 80.0 | 33.0 |
-| whitenoise | 907 | 5.8 | 81.3 | 31.5 |
+| **whitesnout** | **845** | 6.0 | 82.2 | 33.3 |
+| whitenoise | 778 | 6.0 | 86.1 | 31.7 |
 
-> **Platform**: Linux x86_64 (bare metal) · **Python**: 3.14.5 · **uvicorn**: 0.47.0
+> **Platform**: Linux x86_64 (bare metal) · **Python**: 3.14.5 · **uvicorn**: 0.47.0 · WSGI bridge: `a2wsgi`
 >
-> Bench variance is high (±10%) on busy machines; treat numbers as ballpark, not as a fine-grained ranking. The whitenoise side runs through `WsgiToAsgi`, which itself adds per-request overhead — whitesnout avoids that adapter entirely.
+> Both servers run behind uvicorn for an apples-to-apples comparison. Whitenoise is WSGI-only, so it goes through `a2wsgi.WSGIMiddleware`; whitesnout speaks ASGI natively. Variance is ±10% on busy machines.
 
 ### Running yourself
 

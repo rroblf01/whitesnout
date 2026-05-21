@@ -60,8 +60,10 @@
 
 | Server | RPS | P50 (ms) | P99 (ms) | RAM (MB) |
 |---|---|---|---|---|
-| **whitesnout** | **856** | 6.0 | 80.0 | 33.0 |
-| whitenoise | 907 | 5.8 | 81.3 | 31.5 |
+| **whitesnout** | **845** | 6.0 | 82.2 | 33.3 |
+| whitenoise | 778 | 6.0 | 86.1 | 31.7 |
+
+Whitenoise runs behind `a2wsgi.WSGIMiddleware` because it is WSGI-only; whitesnout is ASGI-native. Median of 15 runs.
 
 ## 1.0.0 (2026-05-21)
 
