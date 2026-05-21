@@ -6,6 +6,19 @@ import stat as stat_module
 from contextlib import suppress
 from pathlib import Path
 
+_RUST_AVAILABLE = False
+
+try:
+    from whitesnout._rs import find_compressed as _rs_find_compressed
+    from whitesnout._rs import is_hashed_file as _rs_is_hashed_file
+    from whitesnout._rs import parse_accept_encoding as _rs_parse_accept_encoding
+
+    _RUST_AVAILABLE = True
+except ImportError:
+    _rs_find_compressed = None  # type: ignore[assignment]
+    _rs_is_hashed_file = None  # type: ignore[assignment]
+    _rs_parse_accept_encoding = None  # type: ignore[assignment]
+
 
 def sanitize_path(root: str, requested_path: str) -> Path | None:
     root_resolved = Path(root).resolve()
@@ -58,14 +71,14 @@ def file_stat(path: Path) -> os.stat_result | None:
 
 
 def is_hashed_file(filename: str, pattern: str) -> bool:
+    if _RUST_AVAILABLE:
+        return _rs_is_hashed_file(filename, pattern)  # ty: ignore[call-non-callable]
     return bool(re.search(pattern, filename))
 
 
 def parse_accept_encoding(header: str) -> list[str]:
-    """Parse Accept-Encoding header with quality values.
-
-    Returns ordered list of encoding tokens (highest q first).
-    """
+    if _RUST_AVAILABLE:
+        return list(_rs_parse_accept_encoding(header))  # ty: ignore[call-non-callable]
     entries: list[tuple[float, str]] = []
     for part in header.split(","):
         part = part.strip()
@@ -93,6 +106,16 @@ def find_compressed(
     allow_brotli: bool = True,
     allow_gzip: bool = True,
 ) -> tuple[Path, str] | None:
+    if _RUST_AVAILABLE:
+        result = _rs_find_compressed(  # ty: ignore[call-non-callable]
+            str(file_path),
+            accept_encoding,
+            allow_brotli,
+            allow_gzip,
+        )
+        if result is not None:
+            return (Path(result[0]), result[1])
+        return None
     encodings = parse_accept_encoding(accept_encoding)
 
     for enc in encodings:

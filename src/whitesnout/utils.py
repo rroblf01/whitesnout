@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+_RUST_AVAILABLE = False
+
+try:
+    from whitesnout._rs import guess_content_type as _rs_guess_content_type
+
+    _RUST_AVAILABLE = True
+except ImportError:
+    _rs_guess_content_type = None  # type: ignore[assignment]
+
 MIME_TYPES: dict[str, str] = {
     ".html": "text/html",
     ".css": "text/css",
@@ -31,6 +40,9 @@ MIME_TYPES: dict[str, str] = {
 
 
 def guess_content_type(path: str, charset: str = "utf-8") -> str:
+    if _RUST_AVAILABLE:
+        return _rs_guess_content_type(path, charset)  # ty: ignore[call-non-callable]
+
     import os
 
     _ext = os.path.splitext(path)[1].lower()
