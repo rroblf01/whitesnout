@@ -145,6 +145,17 @@ async def test_cache_control_header_present(client: ASGITestClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_immutable_cache_for_hashed_file(client: ASGITestClient) -> None:
+    resp = await client.get("/css/styles.a1b2c3d4.css")
+    assert resp["status"] == 200
+    cc = resp["headers"].get(b"cache-control")
+    assert cc is not None
+    assert b"public" in cc
+    assert b"immutable" in cc
+    assert b"max-age=31536000" in cc
+
+
+@pytest.mark.asyncio
 async def test_304_not_modified_with_valid_etag(client: ASGITestClient) -> None:
     resp = await client.get("/hello.txt")
     etag = resp["headers"][b"etag"]

@@ -79,6 +79,27 @@ async def test_brotli_preferred_over_gzip() -> None:
     assert resp.headers.get(b"content-encoding") in (b"br", b"gzip")
 
 
+def test_is_hashed_file() -> None:
+    from whitesnout.file_handler import is_hashed_file
+    assert is_hashed_file("styles.a1b2c3d4.css", r"\.[a-f0-9]{8,}\.")
+    assert is_hashed_file("app.12345678.js", r"\.[a-f0-9]{8,}\.")
+    assert not is_hashed_file("styles.css", r"\.[a-f0-9]{8,}\.")
+    assert not is_hashed_file("index.html", r"\.[a-f0-9]{8,}\.")
+
+
+def test_build_cache_control() -> None:
+    from whitesnout.config import Config
+    from whitesnout.response import build_cache_control
+    config = Config()
+    hashed_cc = build_cache_control(config, "styles.a1b2c3d4.css")
+    assert "immutable" in hashed_cc
+    assert "max-age=31536000" in hashed_cc
+
+    normal_cc = build_cache_control(config, "styles.css")
+    assert "immutable" not in normal_cc
+    assert "max-age=3600" in normal_cc
+
+
 async def _request(app, path: str, accept_encoding: str):
     headers = []
     if accept_encoding:
