@@ -57,6 +57,13 @@ def method_not_allowed_headers() -> list[tuple[bytes, bytes]]:
     return [(b"content-type", b"text/plain; charset=utf-8")]
 
 
+def redirect_headers(location: str) -> list[tuple[bytes, bytes]]:
+    return [
+        (b"location", location.encode()),
+        (b"content-type", b"text/plain; charset=utf-8"),
+    ]
+
+
 def compute_etag(st: os.stat_result) -> str:
     return f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
 

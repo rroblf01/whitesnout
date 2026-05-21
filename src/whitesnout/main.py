@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from whitesnout.config import Config
-from whitesnout.file_handler import find_compressed, sanitize_path
+from whitesnout.file_handler import find_compressed, resolve_directory, resolve_index, sanitize_path
 from whitesnout.response import (
     build_cache_control,
     build_headers,
@@ -10,6 +10,7 @@ from whitesnout.response import (
     format_last_modified,
     iter_chunks,
     not_found_headers,
+    redirect_headers,
     send_response,
 )
 from whitesnout.utils import guess_content_type
@@ -83,16 +84,45 @@ class WhiteSnout:
         file_path = sanitize_path(self.config.directory, path)
 
         if file_path is None:
-            if self.config.app is not None:
-                await self.config.app(scope, receive, send)
+            dir_path = resolve_directory(self.config.directory, path)
+            if dir_path is not None:
+                if not path.endswith("/"):
+                    redirect_to = path + "/"
+                    qs = scope.get("query_string", b"")
+                    if qs:
+                        redirect_to += "?" + qs.decode()
+                    await send_response(
+                        send,
+                        301,
+                        redirect_headers(redirect_to),
+                        b"Moved Permanently",
+                    )
+                    return
+                index = resolve_index(dir_path, self.config.index_file)
+                if index is not None:
+                    file_path = index
+                else:
+                    if self.config.app is not None:
+                        await self.config.app(scope, receive, send)
+                    else:
+                        await send_response(
+                            send,
+                            404,
+                            not_found_headers(),
+                            b"Not Found",
+                        )
+                    return
             else:
-                await send_response(
-                    send,
-                    404,
-                    not_found_headers(),
-                    b"Not Found",
-                )
-            return
+                if self.config.app is not None:
+                    await self.config.app(scope, receive, send)
+                else:
+                    await send_response(
+                        send,
+                        404,
+                        not_found_headers(),
+                        b"Not Found",
+                    )
+                return
 
         accept_encoding = _get_accept_encoding(scope)
         compressed = find_compressed(file_path, accept_encoding)

@@ -25,6 +25,26 @@ def sanitize_path(root: str, requested_path: str) -> Path | None:
     return full
 
 
+def resolve_directory(root: str, requested_path: str) -> Path | None:
+    root_resolved = Path(root).resolve()
+    try:
+        full = (root_resolved / requested_path.lstrip("/")).resolve()
+    except (ValueError, RuntimeError):
+        return None
+    if not str(full).startswith(str(root_resolved) + os.sep) and str(full) != str(root_resolved):
+        return None
+    if not full.is_dir():
+        return None
+    return full
+
+
+def resolve_index(dir_path: Path, index_file: str) -> Path | None:
+    index = dir_path / index_file
+    if index.is_file():
+        return index
+    return None
+
+
 def file_stat(path: Path) -> os.stat_result | None:
     try:
         return path.stat()

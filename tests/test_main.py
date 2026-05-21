@@ -220,6 +220,32 @@ async def test_304_not_modified_with_if_modified_since(client: ASGITestClient) -
 
 
 @pytest.mark.asyncio
+async def test_serves_index_for_root(client: ASGITestClient) -> None:
+    resp = await client.get("/")
+    assert resp["status"] == 200
+    assert resp["body"] == read_test_file("static/index.html")
+
+
+@pytest.mark.asyncio
+async def test_redirects_directory_to_trailing_slash(client: ASGITestClient) -> None:
+    resp = await client.get("/subdir")
+    assert resp["status"] == 301
+    assert resp["headers"][b"location"] == b"/subdir/"
+
+
+@pytest.mark.asyncio
+async def test_404_for_directory_without_index(client: ASGITestClient) -> None:
+    resp = await client.get("/css/")
+    assert resp["status"] == 404
+
+
+@pytest.mark.asyncio
+async def test_404_for_subdir_without_index(client: ASGITestClient) -> None:
+    resp = await client.get("/subdir/")
+    assert resp["status"] == 404
+
+
+@pytest.mark.asyncio
 async def test_passes_to_inner_app_when_not_found() -> None:
     inner_response = {"called": False}
 
