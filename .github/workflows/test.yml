@@ -34,7 +34,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: target/
           key: ${{ runner.os }}-rust-${{ hashFiles('Cargo.toml', 'src/lib.rs', 'src/cache.rs', 'src/response.rs', 'src/file_handler.rs', 'src/utils.rs') }}
@@ -84,7 +84,7 @@ jobs:
           components: clippy, rustfmt
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo
