@@ -127,3 +127,120 @@ def test_cli_compress_nonexistent_dir_prints_error(
     cli.main()
     out = capsys.readouterr().out
     assert "Error" in out
+
+
+# ---------- validate subcommand ----------
+
+
+def test_cli_validate_existing_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    (tmp_path / "a.css").write_text("x")
+    monkeypatch.setattr("sys.argv", ["whitesnout", "validate", str(tmp_path)])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "OK    directory" in out
+    assert "OK    files: 1" in out
+
+
+def test_cli_validate_missing_dir_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    monkeypatch.setattr("sys.argv", ["whitesnout", "validate", "/no/such/dir"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_cli_validate_with_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        '{"paths": {"app.css": "app.abc12345.css"}}',
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "whitesnout",
+            "validate",
+            str(tmp_path),
+            "--manifest",
+            str(manifest),
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    assert "OK    manifest" in capsys.readouterr().out
+
+
+def test_cli_validate_require_rust_pass(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    # In dev environments where the rust ext is built (CI builds it explicitly)
+    pytest.importorskip("whitesnout._rs")
+    monkeypatch.setattr(
+        "sys.argv",
+        ["whitesnout", "validate", str(tmp_path), "--require-rust"],
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+
+
+# ---------- serve subcommand (interface only — does not actually bind) ----------
+
+
+def test_cli_serve_missing_dir_fails(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    pytest.importorskip("uvicorn")
+    monkeypatch.setattr("sys.argv", ["whitesnout", "serve", "/no/such/dir"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    assert "not a directory" in capsys.readouterr().err
+
+
+def test_cli_serve_invokes_uvicorn_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("uvicorn")
+    import uvicorn
+
+    captured: dict = {}
+
+    def fake_run(app, **kwargs) -> None:
+        captured["app"] = app
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "whitesnout",
+            "serve",
+            str(tmp_path),
+            "--port",
+            "12345",
+            "--health-check-path",
+            "/healthz",
+        ],
+    )
+    cli.main()
+    from whitesnout import WhiteSnout
+
+    assert isinstance(captured["app"], WhiteSnout)
+    assert captured["kwargs"]["port"] == 12345
+    assert captured["app"].config.health_check_path == "/healthz"

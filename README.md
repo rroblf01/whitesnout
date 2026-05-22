@@ -119,6 +119,33 @@ CLI flags:
 
 This is a build-time step — at runtime WhiteSnout serves the pre-compressed files directly with zero CPU overhead. Common image, font, and archive extensions are skipped automatically (`.jpg`, `.png`, `.woff2`, `.zip`, …).
 
+### Standalone server (`whitesnout serve`)
+
+For quick local previews — no framework, no `uvicorn` invocation:
+
+```console
+$ python -m whitesnout serve ./static --port 8000
+$ python -m whitesnout serve ./static --health-check-path /healthz \
+    --request-id-header X-Request-ID
+```
+
+This wraps `uvicorn.run(WhiteSnout(directory=...))` with sensible defaults. Use it for demos, smoke tests, and the `--require-rust` path of CI. For production, run uvicorn directly with your own app so worker count, proxy headers, and graceful shutdown are explicit.
+
+### Pre-flight (`whitesnout validate`)
+
+Catch misconfigurations before deploy:
+
+```console
+$ python -m whitesnout validate ./static --manifest ./static/staticfiles.json
+OK    directory: /app/static
+OK    files: 142 regular files under directory
+OK    brotli: importable
+OK    rust extension: loaded
+OK    manifest: ./static/staticfiles.json (142 entries)
+```
+
+Exit code is `1` if any `FAIL` line is printed. Flags `--require-brotli` and `--require-rust` upgrade the matching `WARN` to a `FAIL`.
+
 ---
 
 ## Configuration

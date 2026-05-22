@@ -13,6 +13,8 @@
 - **CLI: `--jobs` / `-j` parallel compression** — multi-process worker pool, defaults to CPU count. ~Nx speedup for repos with many compressible files.
 - **CLI: `--quiet` / `-q`** — suppress summary output for scripted use.
 - **Examples**: `examples/litestar/` (Litestar + Prometheus + health + request-id) and `examples/quart/` (Quart + autocompress + request-id).
+- **CLI: `serve` subcommand** — `python -m whitesnout serve ./static --port 8000` launches uvicorn against a bare `WhiteSnout(directory=...)` with optional `--health-check-path` and `--request-id-header`. Pulls `uvicorn` lazily (clear error if not installed).
+- **CLI: `validate` subcommand** — pre-flight check that reports the state of the directory, brotli availability, Rust extension, and (optionally) a manifest file. Exits non-zero on any `FAIL` line; `--require-brotli` and `--require-rust` upgrade missing optionals to failures.
 - **Production docs** — README sections for reverse-proxy layout, uvicorn worker tuning, Kubernetes probes, Docker recipe, and a performance tuning table (`max_cache_size`, `sync_threshold`, `chunk_size`, `autocompress*`).
 - **Supply chain** — `cargo` ecosystem added to `dependabot.yml`; CI runs `pip-audit` + `cargo-audit`; `publish.yml` smoke-tests the built wheel on 3 OS × 2 Python before publishing, and emits sigstore attestations.
 - **Project hygiene** — `SECURITY.md` (disclosure policy + CVSS timelines), `STABILITY.md` (SemVer + deprecation), `CONTRIBUTING.md`, GitHub issue templates (bug + feature), PR template.
@@ -33,7 +35,8 @@
 
 - 12 new tests in `tests/test_lifespan_health_prometheus.py` covering lifespan startup/shutdown, WebSocket pass-through, health check status/headers/hook firing, and Prometheus counter/histogram outputs.
 - 9 new tests in `tests/test_request_id.py` covering generation, echo, propagation across 304/404/405/health.
-- 4 new tests in `tests/test_cli_entry.py` covering CLI globs, jobs, quiet.
+- 6 new tests in `tests/test_cli_entry.py` covering CLI globs, jobs, quiet, `serve`, and `validate` subcommands.
+- 5 new tests in `tests/test_stress.py` covering 200-way concurrency over same file, distinct files, autocompress cache, mixed hit/miss, and conditional GET — guards the LRU / StatCache against races.
 
 ## 2.0.0 (2026-05-21) — Performance, hardening, ecosystem
 
