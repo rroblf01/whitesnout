@@ -1,4 +1,4 @@
-.PHONY: build test shell clean
+.PHONY: build test shell release clean check check-ruff check-ty check-cargo check-fmt
 
 build:
 	docker build -t whitesnout-dev .
@@ -14,6 +14,21 @@ shell:
 release:
 	docker run --rm -v $(PWD):/app -w /app whitesnout-dev \
 		sh -c "maturin build --release --out dist/"
+
+check: check-ruff check-ty check-fmt check-cargo
+
+check-ruff:
+	uv run ruff check src/ tests/ benchmarks/
+	uv run ruff format --check src/ tests/ benchmarks/
+
+check-ty:
+	uv run ty check src/ tests/
+
+check-fmt:
+	cargo fmt --all --check
+
+check-cargo:
+	cargo clippy --all-targets -- -D warnings
 
 clean:
 	docker rmi whitesnout-dev 2>/dev/null || true

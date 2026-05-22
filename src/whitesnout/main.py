@@ -521,6 +521,8 @@ class WhiteSnout:
 
         if is_304:
             await send_response(send, 304, headers)
+            if self._on_request is not None:
+                await self._notify_request(scope, 304, 0, t0)
             if log_enabled:
                 _log_request(method, path, 304, 0, t0)
             return
@@ -536,6 +538,8 @@ class WhiteSnout:
                 ],
                 body,
             )
+            if self._on_request is not None:
+                await self._notify_request(scope, 416, len(body), t0)
             if log_enabled:
                 _log_request(method, path, 416, len(body), t0)
             return

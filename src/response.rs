@@ -391,7 +391,10 @@ pub fn build_full_response(
 
     if method == "GET" {
         if let Some(rh) = range_header {
-            if let Some((start, end)) = parse_range_inner(rh, file_size) {
+            if !rh.starts_with("bytes=") {
+                // Non-`bytes` units are ignored per RFC 9110 §14.1.1 — fall
+                // through to the regular 200 response.
+            } else if let Some((start, end)) = parse_range_inner(rh, file_size) {
                 status = 206;
                 final_length = end - start + 1;
                 headers.push((
