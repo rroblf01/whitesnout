@@ -364,6 +364,20 @@ app = WhiteSnout(directory="static", on_request=on_request)
 
 Async callables are awaited; exceptions raised by the hook are logged and swallowed so they never break a response. Use for OpenTelemetry spans, Prometheus counters, structured access logs, etc.
 
+### OpenTelemetry helper
+
+If you use OpenTelemetry, drop in the bundled adapter:
+
+```python
+from whitesnout import WhiteSnout
+from whitesnout.otel import OpenTelemetryHook
+
+hook = OpenTelemetryHook()  # uses the global tracer provider
+app = WhiteSnout(directory="static", on_request=hook)
+```
+
+Each request becomes a span named `"{METHOD} {path}"` with HTTP semconv attributes (`http.request.method`, `http.response.status_code`, `http.response.body.size`, `url.path`). 5xx responses set the span status to `ERROR`. Pair with `opentelemetry-instrumentation-asgi` on the inner app to get a full trace tree. Optional dep: `opentelemetry-api`.
+
 ### Prometheus helper
 
 If you use `prometheus-client`, drop in the bundled adapter:

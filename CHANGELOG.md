@@ -7,10 +7,13 @@
 - **`health_check_path`** — set a path (e.g. `/healthz`) for a fixed `200 OK` reply with `Cache-Control: no-store`. Bypasses the static file pipeline; intended for load balancers and Kubernetes probes. Fires the `on_request` hook like any other request.
 - **ASGI lifespan handling** — when no inner app is attached, `WhiteSnout` now replies `lifespan.startup.complete` / `lifespan.shutdown.complete` natively so the host server (uvicorn, hypercorn) does not hang on startup. Inner-app forwarding behavior is unchanged when one is attached.
 - **`whitesnout.prometheus.PrometheusHook`** — drop-in `on_request` adapter that exports `whitesnout_requests_total`, `whitesnout_response_bytes_total`, and `whitesnout_request_duration_seconds`. Optional dep: `prometheus-client`.
+- **`whitesnout.otel.OpenTelemetryHook`** — drop-in `on_request` adapter that records each request as a span with HTTP semconv attributes (`http.request.method`, `http.response.status_code`, `http.response.body.size`, `url.path`). 5xx sets span status to `ERROR`. Optional dep: `opentelemetry-api`.
 - **Production docs** — README sections for reverse-proxy layout, uvicorn worker tuning, Kubernetes probes, Docker recipe, and a performance tuning table (`max_cache_size`, `sync_threshold`, `chunk_size`, `autocompress*`).
 - **Supply chain** — `cargo` ecosystem added to `dependabot.yml`; CI runs `pip-audit` + `cargo-audit`; `publish.yml` smoke-tests the built wheel on 3 OS × 2 Python before publishing, and emits sigstore attestations.
 - **Project hygiene** — `SECURITY.md` (disclosure policy + CVSS timelines), `STABILITY.md` (SemVer + deprecation), `CONTRIBUTING.md`, GitHub issue templates (bug + feature), PR template.
 - **Automated release notes** — `release-drafter` workflow drafts the next GitHub release as PRs land on `main`, classified by label.
+- **Nightly benchmark workflow** — `bench.yml` runs `benchmarks/benchmark.py` weekly (Mondays) and on-demand, uploading numbers as artifacts plus a workflow summary. Directional, not a CI gate.
+- **Property-based path traversal fuzz** — `tests/test_fuzz_security.py` uses `hypothesis` to throw ~600 random inputs at `sanitize_path` per CI run; invariant is "either `None` or a path strictly inside root."
 
 ### Documented
 
