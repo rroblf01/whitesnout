@@ -66,6 +66,11 @@ build-backend = "maturin"
 [tool.maturin]
 module-name = "whitesnout._rs"
 python-source = "src"
+# Ship Cargo.lock in the sdist so build backends (uv, pip with isolation)
+# reproduce the exact dep graph instead of resolving fresh. Without this,
+# build isolation copies the source tree minus Cargo.lock and cargo picks
+# up newer (incompatible) pyo3 minors.
+include = [{ path = "Cargo.lock", format = "sdist" }]
 
 [dependency-groups]
 dev = [
