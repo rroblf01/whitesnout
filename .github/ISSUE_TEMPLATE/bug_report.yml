@@ -1,0 +1,73 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For security issues, do **not** file a public bug. See
+        [SECURITY.md](https://github.com/rrobles-qdq/whitesnout/blob/main/SECURITY.md).
+
+  - type: input
+    id: whitesnout-version
+    attributes:
+      label: WhiteSnout version
+      placeholder: "2.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      placeholder: "3.13.0"
+    validations:
+      required: true
+
+  - type: input
+    id: server
+    attributes:
+      label: ASGI server + version
+      description: "uvicorn 0.47.0, hypercorn 0.17, etc."
+      placeholder: "uvicorn 0.47.0"
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / arch
+      placeholder: "Ubuntu 24.04 x86_64"
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: |
+        A short script that triggers the bug. Include the `WhiteSnout(...)`
+        invocation, an example `directory` layout, and the request that
+        misbehaves.
+      render: python
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Include status codes, full headers, and any tracebacks.
+    validations:
+      required: true
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra context
+      description: |
+        Anything else relevant — reverse proxy, Docker setup, custom
+        `on_request` hook, manifest, etc.

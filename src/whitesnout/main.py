@@ -211,6 +211,7 @@ class WhiteSnout:
         on_request: Callable | None = None,
         autorefresh: bool | None = None,
         path_resolver: Callable | None = None,
+        health_check_path: str | None = None,
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -242,6 +243,7 @@ class WhiteSnout:
             on_request=on_request,
             autorefresh=autorefresh,
             path_resolver=path_resolver,
+            health_check_path=health_check_path,
         )
         self._app = app
         self._stat_cache: StatCache = StatCache(
@@ -343,6 +345,9 @@ class WhiteSnout:
             app = self._app
             if app is not None:
                 await app(scope, receive, send)
+                return
+            if scope["type"] == "lifespan":
+                await self._handle_lifespan(receive, send)
             return
 
         method = scope["method"]
@@ -390,6 +395,22 @@ class WhiteSnout:
             return
 
         path = scope["path"]
+
+        if config.health_check_path and path == config.health_check_path:
+            await send_response(
+                send,
+                200,
+                [
+                    (b"content-type", b"text/plain; charset=utf-8"),
+                    (b"content-length", b"2"),
+                    (b"cache-control", b"no-store"),
+                ],
+                b"OK",
+            )
+            if log_enabled:
+                _log_request(method, path, 200, 2, t0)
+            await self._notify_request(scope, 200, 2, t0)
+            return
 
         # Autorefresh: nuke caches so a moved/edited file is picked up on the
         # next request. Cheap (HashMap clear); intended for dev only.
@@ -656,6 +677,18 @@ class WhiteSnout:
             await self._notify_request(scope, status, content_length, t0)
         if log_enabled:
             _log_request(method, path, status, content_length, t0)
+
+    async def _handle_lifespan(self, receive: ASGIReceive, send: ASGISend) -> None:
+        while True:
+            message = await receive()
+            mtype = message["type"]
+            if mtype == "lifespan.startup":
+                await send({"type": "lifespan.startup.complete"})
+            elif mtype == "lifespan.shutdown":
+                await send({"type": "lifespan.shutdown.complete"})
+                return
+            else:
+                return
 
     async def _notify_request(
         self, scope: dict, status: int, length: int, t0: float

@@ -44,6 +44,7 @@ _ENV_PARSERS = {
     "autocompress": _bool,
     "autocompress_max_size": int,
     "autorefresh": _bool,
+    "health_check_path": str,
 }
 
 
@@ -88,6 +89,7 @@ class Config:
         "on_request",
         "autorefresh",
         "path_resolver",
+        "health_check_path",
     )
 
     def __init__(
@@ -122,6 +124,7 @@ class Config:
         on_request: Callable | None = None,
         autorefresh: bool | None = None,
         path_resolver: Callable | None = None,
+        health_check_path: str | None = None,
     ) -> None:
         env = _read_env()
 
@@ -244,3 +247,8 @@ class Config:
             autorefresh if autorefresh is not None else env.get("autorefresh", False)
         )
         self.path_resolver = path_resolver
+        self.health_check_path = (
+            health_check_path
+            if health_check_path is not None
+            else env.get("health_check_path")
+        )

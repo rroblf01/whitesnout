@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`health_check_path`** — set a path (e.g. `/healthz`) for a fixed `200 OK` reply with `Cache-Control: no-store`. Bypasses the static file pipeline; intended for load balancers and Kubernetes probes. Fires the `on_request` hook like any other request.
+- **ASGI lifespan handling** — when no inner app is attached, `WhiteSnout` now replies `lifespan.startup.complete` / `lifespan.shutdown.complete` natively so the host server (uvicorn, hypercorn) does not hang on startup. Inner-app forwarding behavior is unchanged when one is attached.
+- **`whitesnout.prometheus.PrometheusHook`** — drop-in `on_request` adapter that exports `whitesnout_requests_total`, `whitesnout_response_bytes_total`, and `whitesnout_request_duration_seconds`. Optional dep: `prometheus-client`.
+- **Production docs** — README sections for reverse-proxy layout, uvicorn worker tuning, Kubernetes probes, Docker recipe, and a performance tuning table (`max_cache_size`, `sync_threshold`, `chunk_size`, `autocompress*`).
+- **Supply chain** — `cargo` ecosystem added to `dependabot.yml`; CI runs `pip-audit` + `cargo-audit`; `publish.yml` smoke-tests the built wheel on 3 OS × 2 Python before publishing, and emits sigstore attestations.
+- **Project hygiene** — `SECURITY.md` (disclosure policy + CVSS timelines), `STABILITY.md` (SemVer + deprecation), `CONTRIBUTING.md`, GitHub issue templates (bug + feature), PR template.
+
+### Internal
+
+- 11 new tests in `tests/test_lifespan_health_prometheus.py` covering lifespan startup/shutdown, health check status/headers/hook firing, and Prometheus counter/histogram outputs.
+
 ## 2.0.0 (2026-05-21) — Performance, hardening, ecosystem
 
 ### Highlights

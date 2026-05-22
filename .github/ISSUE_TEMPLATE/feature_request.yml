@@ -1,0 +1,48 @@
+name: Feature request
+description: Propose a new capability or integration
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening: skim [README "Out of scope"](https://github.com/rrobles-qdq/whitesnout/blob/main/README.md#stability--security)
+        and [STABILITY.md](https://github.com/rrobles-qdq/whitesnout/blob/main/STABILITY.md).
+        WSGI support, built-in auth, rate limiting, and HTTP/2 push are out of
+        scope and will be closed.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the use case, not the proposed code.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API
+      description: |
+        How would a user reach this from `WhiteSnout(...)` or a helper
+        module? Show the call site, not the implementation.
+      render: python
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Can this live in user code, in `on_request`, in `path_resolver`, or
+        behind a reverse proxy?
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Where would this live?
+      options:
+        - "Core `WhiteSnout` kwarg"
+        - "New `whitesnout.<module>`"
+        - "Documentation only"
+        - "Not sure"
+    validations:
+      required: true

@@ -364,6 +364,37 @@ app = WhiteSnout(directory="static", on_request=on_request)
 
 Async callables are awaited; exceptions raised by the hook are logged and swallowed so they never break a response. Use for OpenTelemetry spans, Prometheus counters, structured access logs, etc.
 
+### Prometheus helper
+
+If you use `prometheus-client`, drop in the bundled adapter:
+
+```python
+from prometheus_client import make_asgi_app
+from whitesnout import WhiteSnout
+from whitesnout.prometheus import PrometheusHook
+
+hook = PrometheusHook()
+app = WhiteSnout(directory="static", on_request=hook)
+# Expose /metrics via prometheus_client.make_asgi_app() mounted on a sibling
+# route in your framework (FastAPI, Starlette, Django).
+```
+
+Metrics emitted:
+
+- `whitesnout_requests_total{method,status}` — counter
+- `whitesnout_response_bytes_total{method}` — counter
+- `whitesnout_request_duration_seconds{method,status}` — histogram
+
+### Health check endpoint
+
+For load balancers and Kubernetes probes, set `health_check_path`. The reply is `200 OK` with `text/plain` body `OK` and `Cache-Control: no-store` — it bypasses the static file pipeline (no disk I/O, no cache lookups):
+
+```python
+app = WhiteSnout(directory="static", health_check_path="/healthz")
+```
+
+The check fires the `on_request` hook with status `200` like any other request, so it shows up in your metrics.
+
 ---
 
 ## Django integration
@@ -465,6 +496,110 @@ Each example is self-contained — `cd` in, install requirements, `uvicorn` to r
 | `WhiteNoise(application, root=...)` | `WhiteSnout(application, directory=...)` |
 
 ASGI-specific: whitenoise is WSGI-only and must be wrapped in `WsgiToAsgi` when used with ASGI servers, paying the adapter cost on every request. Whitesnout is ASGI-native.
+
+---
+
+## Production deployment
+
+WhiteSnout is a regular ASGI app. It does **not** open ports, terminate TLS, or spawn workers — that is the ASGI server's job. The recipe below is what we run in production.
+
+### Behind a reverse proxy (recommended)
+
+```
+[client] -> [nginx / Caddy / Traefik] -> [uvicorn workers] -> [WhiteSnout]
+```
+
+The proxy terminates TLS, applies rate limits, and serves large static binaries (>10 MB) via `sendfile` if you point it at the same `static/` directory. WhiteSnout handles everything else — manifest-hashed assets, range requests, conditional GETs, on-the-fly compression, security headers.
+
+Minimal `uvicorn` invocation:
+
+```console
+$ uvicorn myapp:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 4 \
+    --proxy-headers \
+    --forwarded-allow-ips='*' \
+    --log-level warning
+```
+
+`--workers 4` matches roughly 2× CPU cores. WhiteSnout is async-safe with multiple workers — each worker has its own in-process cache, which is the trade-off you want (no shared-memory invalidation).
+
+### Graceful shutdown
+
+WhiteSnout handles ASGI **lifespan** events natively. When the host server starts draining (SIGTERM, `kubectl rollout`, etc.), WhiteSnout responds `lifespan.shutdown.complete` immediately — there is no background work, queue, or open connection to flush.
+
+Pair with `uvicorn --timeout-graceful-shutdown 30` (default 30s) so in-flight requests finish before the worker exits.
+
+### Kubernetes
+
+Suggested probe config (assuming `health_check_path="/healthz"`):
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 8000
+  periodSeconds: 5
+  failureThreshold: 2
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8000
+  periodSeconds: 10
+  failureThreshold: 3
+```
+
+The endpoint is `Cache-Control: no-store` and bypasses the file pipeline, so probes never poison the cache.
+
+### Docker
+
+WhiteSnout ships pre-compressed wheels for `manylinux_2_28_x86_64`, `aarch64`, macOS x86/arm, and Windows. A minimal `Dockerfile`:
+
+```dockerfile
+FROM python:3.13-slim
+WORKDIR /app
+RUN pip install --no-cache-dir whitesnout uvicorn[standard]
+COPY . .
+CMD ["uvicorn", "myapp:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+```
+
+No Rust toolchain inside the image — wheels install in milliseconds.
+
+---
+
+## Performance tuning
+
+Defaults are tuned for typical SPAs (small JS/CSS bundles, a few MB total). For larger asset sets, two knobs help:
+
+| Knob | Default | When to change |
+|---|---|---|
+| `max_cache_size` | 64 | Set to roughly the count of unique URLs you serve. Hits stay in the path/stat cache; misses re-stat the FS. For 10k-file sites, 1024–4096. |
+| `sync_threshold` | 65536 bytes (64 KiB) | Files at or below this size use a fast-path single `send()` (skips async generator overhead). Raise to 131072 if 95% of your assets are under 128 KiB and you have memory headroom; lower if you serve large media. |
+| `chunk_size` | 65536 bytes | Stream chunk size for files above `sync_threshold`. Match this to your network MSS or the proxy buffer. Larger = fewer ASGI sends, higher RAM per request. |
+| `autocompress` | `False` | Enable only when you cannot run `whitesnout compress dir/` ahead of time. Compression is cached in-memory by `(path, mtime, encoding)` — first request pays the CPU cost; the rest are free. |
+| `autocompress_max_size` | 1 MiB | Cap on the source file size considered for on-the-fly compression. Large files should be pre-compressed. |
+
+### Pre-compress over autocompress
+
+`whitesnout compress static/` (or `CompressedManifestStaticFilesStorage` for Django) emits `.gz` and `.br` siblings at build time. Serving them is **zero CPU** at request time — WhiteSnout `stat`s the variant and sends it directly. `autocompress=True` is a fallback for dev or for files that change at runtime.
+
+### Disable what you do not need
+
+```python
+app = WhiteSnout(
+    directory="static",
+    log_level=None,           # skip access-log formatting
+    security_headers=False,   # if your reverse proxy emits them
+    brotli=False,             # if you do not ship .br variants
+)
+```
+
+`log_level=None` saves a `time.perf_counter()` call and the headers walk on every request. Worth it under heavy load if you log at the proxy.
+
+### What the Rust hot path does
+
+The Rust extension (`whitesnout._rs`) fuses `find_compressed` + `stat` + header construction into a single FFI call (`build_full_response_v2`). On a cache hit it returns roughly 1µs of headers; on a miss it returns ready-to-send bytes. If the extension is unavailable (no wheel for your arch), the Python fallback kicks in transparently — slower but functionally identical, exercised by `tests/test_fallbacks.py`.
 
 ---
 
