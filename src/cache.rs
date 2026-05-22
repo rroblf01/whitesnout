@@ -1,10 +1,11 @@
 use lru::LruCache;
 use pyo3::prelude::*;
+use pyo3::types::PyAny;
 use std::num::NonZeroUsize;
 
 #[pyclass]
 pub struct LRUCache {
-    cache: LruCache<String, PyObject>,
+    cache: LruCache<String, Py<PyAny>>,
 }
 
 #[pymethods]
@@ -18,11 +19,11 @@ impl LRUCache {
         }
     }
 
-    pub fn get(&mut self, py: Python<'_>, key: &str) -> Option<PyObject> {
+    pub fn get(&mut self, py: Python<'_>, key: &str) -> Option<Py<PyAny>> {
         self.cache.get(key).map(|obj| obj.clone_ref(py))
     }
 
-    pub fn put(&mut self, key: &str, value: PyObject) {
+    pub fn put(&mut self, key: &str, value: Py<PyAny>) {
         self.cache.put(key.to_string(), value);
     }
 
