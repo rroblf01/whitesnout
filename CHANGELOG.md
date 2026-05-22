@@ -8,11 +8,15 @@
 - **ASGI lifespan handling** — when no inner app is attached, `WhiteSnout` now replies `lifespan.startup.complete` / `lifespan.shutdown.complete` natively so the host server (uvicorn, hypercorn) does not hang on startup. Inner-app forwarding behavior is unchanged when one is attached.
 - **`whitesnout.prometheus.PrometheusHook`** — drop-in `on_request` adapter that exports `whitesnout_requests_total`, `whitesnout_response_bytes_total`, and `whitesnout_request_duration_seconds`. Optional dep: `prometheus-client`.
 - **`whitesnout.otel.OpenTelemetryHook`** — drop-in `on_request` adapter that records each request as a span with HTTP semconv attributes (`http.request.method`, `http.response.status_code`, `http.response.body.size`, `url.path`). 5xx sets span status to `ERROR`. Optional dep: `opentelemetry-api`.
+- **`request_id_header`** — set a header name (e.g. `"X-Request-ID"`) and WhiteSnout echoes incoming values or generates a UUID4 hex when missing. The same ID is exposed to `on_request` hooks via `info["request_id"]`. Env var: `WHITESNOUT_REQUEST_ID_HEADER`.
+- **CLI: `--include` / `--exclude` glob filters** — `python -m whitesnout compress static/ --include "*.css" --exclude "vendor/*"`. Repeatable.
+- **CLI: `--jobs` / `-j` parallel compression** — multi-process worker pool, defaults to CPU count. ~Nx speedup for repos with many compressible files.
+- **CLI: `--quiet` / `-q`** — suppress summary output for scripted use.
+- **Examples**: `examples/litestar/` (Litestar + Prometheus + health + request-id) and `examples/quart/` (Quart + autocompress + request-id).
 - **Production docs** — README sections for reverse-proxy layout, uvicorn worker tuning, Kubernetes probes, Docker recipe, and a performance tuning table (`max_cache_size`, `sync_threshold`, `chunk_size`, `autocompress*`).
 - **Supply chain** — `cargo` ecosystem added to `dependabot.yml`; CI runs `pip-audit` + `cargo-audit`; `publish.yml` smoke-tests the built wheel on 3 OS × 2 Python before publishing, and emits sigstore attestations.
 - **Project hygiene** — `SECURITY.md` (disclosure policy + CVSS timelines), `STABILITY.md` (SemVer + deprecation), `CONTRIBUTING.md`, GitHub issue templates (bug + feature), PR template.
 - **Automated release notes** — `release-drafter` workflow drafts the next GitHub release as PRs land on `main`, classified by label.
-- **Nightly benchmark workflow** — `bench.yml` runs `benchmarks/benchmark.py` weekly (Mondays) and on-demand, uploading numbers as artifacts plus a workflow summary. Directional, not a CI gate.
 - **Property-based path traversal fuzz** — `tests/test_fuzz_security.py` uses `hypothesis` to throw ~600 random inputs at `sanitize_path` per CI run; invariant is "either `None` or a path strictly inside root."
 
 ### Documented
@@ -20,9 +24,16 @@
 - **WebSocket pass-through** — README clarifies that WebSocket scopes are forwarded transparently to the inner ASGI app; WhiteSnout itself only intercepts HTTP.
 - **Async runtime stance** — `STABILITY.md` documents asyncio-only support; trio/curio users should swap server.
 
+### Changed
+
+- **CLI** rewritten on top of `argparse`. The `compress` subcommand keeps its previous semantics but now exits with argparse's standard codes (2 for missing args / unknown commands instead of 1).
+- **`on_request` hook info dict** gains a `request_id` key (string or `None` depending on `request_id_header`).
+
 ### Internal
 
 - 12 new tests in `tests/test_lifespan_health_prometheus.py` covering lifespan startup/shutdown, WebSocket pass-through, health check status/headers/hook firing, and Prometheus counter/histogram outputs.
+- 9 new tests in `tests/test_request_id.py` covering generation, echo, propagation across 304/404/405/health.
+- 4 new tests in `tests/test_cli_entry.py` covering CLI globs, jobs, quiet.
 
 ## 2.0.0 (2026-05-21) — Performance, hardening, ecosystem
 

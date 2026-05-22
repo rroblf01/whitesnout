@@ -120,6 +120,18 @@ def _override_content_type(
             return
 
 
+def _extract_or_generate_request_id(
+    headers: list[tuple[bytes, bytes]] | tuple, header_name_lower: bytes
+) -> bytes:
+    """Return the incoming request-id value or a freshly generated one (uuid4 hex)."""
+    for name, value in headers:
+        if name.lower() == header_name_lower:
+            return value
+    from uuid import uuid4
+
+    return uuid4().hex.encode()
+
+
 def _resolve_requested_path(
     config: Config,
     path: str,
@@ -176,6 +188,7 @@ class WhiteSnout:
         "_compressed_cache",
         "_on_request",
         "_on_request_is_async",
+        "_request_id_header_bytes",
     )
 
     def __init__(
@@ -212,6 +225,7 @@ class WhiteSnout:
         autorefresh: bool | None = None,
         path_resolver: Callable | None = None,
         health_check_path: str | None = None,
+        request_id_header: str | None = None,
     ) -> None:
         self.config = Config(
             directory=directory,
@@ -244,6 +258,7 @@ class WhiteSnout:
             autorefresh=autorefresh,
             path_resolver=path_resolver,
             health_check_path=health_check_path,
+            request_id_header=request_id_header,
         )
         self._app = app
         self._stat_cache: StatCache = StatCache(
@@ -273,6 +288,11 @@ class WhiteSnout:
         self._on_request_is_async = (
             self._on_request is not None
             and inspect.iscoroutinefunction(self._on_request)
+        )
+
+        rid_header = self.config.request_id_header
+        self._request_id_header_bytes: bytes | None = (
+            rid_header.lower().encode() if rid_header else None
         )
 
         self._setup_logging()
@@ -350,18 +370,23 @@ class WhiteSnout:
                 await self._handle_lifespan(receive, send)
             return
 
+        request_id_pair: tuple[bytes, bytes] | None = None
+        if self._request_id_header_bytes is not None:
+            rid_value = _extract_or_generate_request_id(
+                scope.get("headers", ()), self._request_id_header_bytes
+            )
+            request_id_pair = (self._request_id_header_bytes, rid_value)
+
         method = scope["method"]
         if method not in ("GET", "HEAD") and method != "OPTIONS":
             if self._app is not None:
                 await self._app(scope, receive, send)
             else:
                 body = config.error_responses.get(405, b"")
-                await send_response(
-                    send,
-                    405,
-                    error_headers(405, body, config.error_responses),
-                    body,
-                )
+                hdrs = error_headers(405, body, config.error_responses)
+                if request_id_pair is not None:
+                    hdrs.append(request_id_pair)
+                await send_response(send, 405, hdrs, body)
             return
 
         # Extract request Origin (used for CORS allowlist) + relevant headers
@@ -376,12 +401,10 @@ class WhiteSnout:
             allowed = _resolve_cors_origin(config.cors_allow_origins, request_origin)
             if allowed is None:
                 body = config.error_responses.get(405, b"")
-                await send_response(
-                    send,
-                    405,
-                    error_headers(405, body, config.error_responses),
-                    body,
-                )
+                hdrs = error_headers(405, body, config.error_responses)
+                if request_id_pair is not None:
+                    hdrs.append(request_id_pair)
+                await send_response(send, 405, hdrs, body)
                 return
             extra = [(b"access-control-allow-origin", allowed)]
             if "*" not in config.cors_allow_origins:
@@ -391,25 +414,31 @@ class WhiteSnout:
                 content_length=0,
                 extra=extra,
             )
+            if request_id_pair is not None:
+                headers.append(request_id_pair)
             await send_response(send, 204, headers)
             return
 
         path = scope["path"]
 
         if config.health_check_path and path == config.health_check_path:
-            await send_response(
-                send,
-                200,
-                [
-                    (b"content-type", b"text/plain; charset=utf-8"),
-                    (b"content-length", b"2"),
-                    (b"cache-control", b"no-store"),
-                ],
-                b"OK",
-            )
+            hdrs: list[tuple[bytes, bytes]] = [
+                (b"content-type", b"text/plain; charset=utf-8"),
+                (b"content-length", b"2"),
+                (b"cache-control", b"no-store"),
+            ]
+            if request_id_pair is not None:
+                hdrs.append(request_id_pair)
+            await send_response(send, 200, hdrs, b"OK")
             if log_enabled:
                 _log_request(method, path, 200, 2, t0)
-            await self._notify_request(scope, 200, 2, t0)
+            await self._notify_request(
+                scope,
+                200,
+                2,
+                t0,
+                request_id_pair[1] if request_id_pair else None,
+            )
             return
 
         # Autorefresh: nuke caches so a moved/edited file is picked up on the
@@ -439,12 +468,10 @@ class WhiteSnout:
                     if qs:
                         redirect_to += "?" + qs.decode()
                     body = config.error_responses.get(301, b"")
-                    await send_response(
-                        send,
-                        301,
-                        redirect_headers(redirect_to),
-                        body,
-                    )
+                    hdrs = redirect_headers(redirect_to)
+                    if request_id_pair is not None:
+                        hdrs.append(request_id_pair)
+                    await send_response(send, 301, hdrs, body)
                     return
                 index = resolve_index(dir_path, config.index_file)
                 if index is not None:
@@ -454,24 +481,20 @@ class WhiteSnout:
                         await self._app(scope, receive, send)
                     else:
                         body = config.error_responses.get(404, b"")
-                        await send_response(
-                            send,
-                            404,
-                            error_headers(404, body, config.error_responses),
-                            body,
-                        )
+                        hdrs = error_headers(404, body, config.error_responses)
+                        if request_id_pair is not None:
+                            hdrs.append(request_id_pair)
+                        await send_response(send, 404, hdrs, body)
                     return
             else:
                 if self._app is not None:
                     await self._app(scope, receive, send)
                 else:
                     body = config.error_responses.get(404, b"")
-                    await send_response(
-                        send,
-                        404,
-                        error_headers(404, body, config.error_responses),
-                        body,
-                    )
+                    hdrs = error_headers(404, body, config.error_responses)
+                    if request_id_pair is not None:
+                        hdrs.append(request_id_pair)
+                    await send_response(send, 404, hdrs, body)
                 return
 
         # Extract relevant headers in a single pass
@@ -540,10 +563,15 @@ class WhiteSnout:
         if config.mime_types:
             _override_content_type(headers, str(file_path), config.mime_types)
 
+        if request_id_pair is not None:
+            headers.append(request_id_pair)
+
+        request_id_bytes = request_id_pair[1] if request_id_pair else None
+
         if is_304:
             await send_response(send, 304, headers)
             if self._on_request is not None:
-                await self._notify_request(scope, 304, 0, t0)
+                await self._notify_request(scope, 304, 0, t0, request_id_bytes)
             if log_enabled:
                 _log_request(method, path, 304, 0, t0)
             return
@@ -560,7 +588,7 @@ class WhiteSnout:
                 body,
             )
             if self._on_request is not None:
-                await self._notify_request(scope, 416, len(body), t0)
+                await self._notify_request(scope, 416, len(body), t0, request_id_bytes)
             if log_enabled:
                 _log_request(method, path, 416, len(body), t0)
             return
@@ -568,7 +596,9 @@ class WhiteSnout:
         if method == "HEAD":
             await send_response(send, status, headers)
             if self._on_request is not None:
-                await self._notify_request(scope, status, content_length, t0)
+                await self._notify_request(
+                    scope, status, content_length, t0, request_id_bytes
+                )
             if log_enabled:
                 _log_request(method, path, status, content_length, t0)
             return
@@ -606,7 +636,11 @@ class WhiteSnout:
                     )
                     if self._on_request is not None:
                         await self._notify_request(
-                            scope, status, len(compressed_body), t0
+                            scope,
+                            status,
+                            len(compressed_body),
+                            t0,
+                            request_id_bytes,
                         )
                     if log_enabled:
                         _log_request(method, path, status, len(compressed_body), t0)
@@ -636,7 +670,9 @@ class WhiteSnout:
                 }
             )
             if self._on_request is not None:
-                await self._notify_request(scope, status, content_length, t0)
+                await self._notify_request(
+                    scope, status, content_length, t0, request_id_bytes
+                )
             if log_enabled:
                 _log_request(method, path, status, content_length, t0)
             return
@@ -674,7 +710,9 @@ class WhiteSnout:
         )
 
         if self._on_request is not None:
-            await self._notify_request(scope, status, content_length, t0)
+            await self._notify_request(
+                scope, status, content_length, t0, request_id_bytes
+            )
         if log_enabled:
             _log_request(method, path, status, content_length, t0)
 
@@ -691,7 +729,12 @@ class WhiteSnout:
                 return
 
     async def _notify_request(
-        self, scope: dict, status: int, length: int, t0: float
+        self,
+        scope: dict,
+        status: int,
+        length: int,
+        t0: float,
+        request_id: bytes | None = None,
     ) -> None:
         if self._on_request is None:
             return
@@ -703,6 +746,7 @@ class WhiteSnout:
             "length": length,
             "elapsed_s": elapsed,
             "scope": scope,
+            "request_id": request_id.decode() if request_id else None,
         }
         try:
             if self._on_request_is_async:

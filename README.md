@@ -107,7 +107,17 @@ $ python -m whitesnout compress static/
 Compressed: 42 gzip, 42 brotli
 ```
 
-This is a build-time step — at runtime WhiteSnout serves the pre-compressed files directly with zero CPU overhead.
+CLI flags:
+
+| Flag | What it does |
+|---|---|
+| `--force` | Recompress even when the `.gz` / `.br` is newer than the source |
+| `--include GLOB` | Only compress matching files. Repeatable (e.g. `--include "*.css" --include "*.js"`) |
+| `--exclude GLOB` | Skip matching files. Repeatable |
+| `--jobs N` / `-j N` | Worker processes (default: CPU count). Set `--jobs 1` for deterministic ordering |
+| `--quiet` / `-q` | Suppress summary output |
+
+This is a build-time step — at runtime WhiteSnout serves the pre-compressed files directly with zero CPU overhead. Common image, font, and archive extensions are skipped automatically (`.jpg`, `.png`, `.woff2`, `.zip`, …).
 
 ---
 
@@ -144,6 +154,8 @@ All options can be passed as keyword arguments to `WhiteSnout`:
 | `on_request` | `None` | Callable (sync or async) invoked after every served request with a dict of metadata |
 | `autorefresh` | `False` | Clear path and stat caches on every request (dev mode); auto-enabled by the Django wrapper when `settings.DEBUG` is True |
 | `path_resolver` | `None` | Optional callable `(path: str) -> Path \| None` called when the standard resolution misses; used by the Django integration to plug `staticfiles.finders` |
+| `health_check_path` | `None` | Path (e.g. `"/healthz"`) for a fixed `200 OK` reply with `Cache-Control: no-store`; bypasses the file pipeline |
+| `request_id_header` | `None` | Header name (e.g. `"X-Request-ID"`) for per-request correlation; echoes incoming value or generates a UUID4 hex; exposed in `on_request` info as `request_id` |
 | `error_responses` | `{404: b"Not Found", 405: b"Method Not Allowed", 416: b"Range Not Satisfiable"}` | Customize response bodies for error status codes; `{}` for empty bodies |
 | `log_level` | `"INFO"` | Logging level (`"DEBUG"`, `"INFO"`, `"WARNING"`, etc.); `None` disables logging entirely |
 
@@ -399,6 +411,28 @@ Metrics emitted:
 - `whitesnout_response_bytes_total{method}` — counter
 - `whitesnout_request_duration_seconds{method,status}` — histogram
 
+### Request-ID propagation
+
+Pass `request_id_header="X-Request-ID"` and WhiteSnout will:
+
+- Echo the incoming header value back on the response if present, or
+- Generate a fresh UUID4 hex (32 chars, no dashes) when missing, and add it to the response.
+
+The same value is exposed to `on_request` hooks via `info["request_id"]`, so structured loggers and tracing exporters can stitch every request together with the upstream proxy and downstream app:
+
+```python
+app = WhiteSnout(
+    inner_app,
+    directory="static",
+    request_id_header="X-Request-ID",
+    on_request=lambda info: logger.info(
+        "static", extra={"request_id": info["request_id"], **info}
+    ),
+)
+```
+
+The same header name is used for both directions — if your reverse proxy already inserts `X-Request-Id`, WhiteSnout will pick it up, not double it.
+
 ### Health check endpoint
 
 For load balancers and Kubernetes probes, set `health_check_path`. The reply is `200 OK` with `text/plain` body `OK` and `Cache-Control: no-store` — it bypasses the static file pipeline (no disk I/O, no cache lookups):
@@ -486,6 +520,8 @@ End-to-end deployments live in [`examples/`](examples/):
 - [`fastapi-spa/`](examples/fastapi-spa/) — FastAPI + Vite SPA with manifest, SPA fallback, hardened headers, autocompress
 - [`django-asgi/`](examples/django-asgi/) — Django ASGI with `get_static_application()` + `CompressedManifestStaticFilesStorage` + dev mode (`use_finders` / `autorefresh`)
 - [`starlette/`](examples/starlette/) — Starlette + multi-directory mount + `add_files` overrides + `on_request` observability hook
+- [`litestar/`](examples/litestar/) — Litestar + Prometheus metrics + health endpoint + per-request correlation ID
+- [`quart/`](examples/quart/) — Quart (async Flask) + on-the-fly compression + request-id propagation
 
 Each example is self-contained — `cd` in, install requirements, `uvicorn` to run.
 
