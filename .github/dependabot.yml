@@ -27,3 +27,19 @@ updates:
     labels:
       - "dependencies"
       - "ci"
+
+  # Rust crates (PyO3 hot path). Cargo.lock is tracked so security
+  # advisories on transitive deps surface as PRs.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "rust"
+    groups:
+      rust-deps:
+        patterns:
+          - "*"

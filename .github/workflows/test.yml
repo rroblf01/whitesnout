@@ -94,3 +94,32 @@ jobs:
       - run: cargo fmt --all --check
 
       - run: cargo clippy --all-targets -- -D warnings
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install pip-audit
+        run: uv tool install pip-audit
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: pip-audit
+        run: uv tool run pip-audit --strict --disable-pip
+        continue-on-error: true
+
+      - name: cargo audit
+        run: cargo audit --deny warnings
+        continue-on-error: true

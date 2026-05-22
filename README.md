@@ -573,6 +573,16 @@ $ uv run python benchmarks/benchmark_nginx.py    # nginx ceiling (requires nginx
 
 ---
 
+## Stability & security
+
+- [STABILITY.md](STABILITY.md) — versioning, deprecation policy, public API surface.
+- [SECURITY.md](SECURITY.md) — vulnerability disclosure and supply-chain notes.
+
+Releases land on PyPI via GitHub Actions Trusted Publishing (OIDC); wheels are
+attested with `sigstore` and verifiable from the release artifacts.
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for the full text.
