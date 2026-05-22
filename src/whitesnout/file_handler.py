@@ -40,7 +40,8 @@ def sanitize_path(root: str, requested_path: str) -> Path | None:
         return None
     try:
         st = full.stat()
-    except OSError:
+    except (OSError, ValueError):
+        # Windows raises ValueError for embedded null bytes; POSIX raises OSError.
         return None
     import stat as stat_module
 
@@ -59,15 +60,21 @@ def resolve_directory(root: str, requested_path: str) -> Path | None:
         root_resolved
     ):
         return None
-    if not full.is_dir():
+    try:
+        if not full.is_dir():
+            return None
+    except (OSError, ValueError):
         return None
     return full
 
 
 def resolve_index(dir_path: Path, index_file: str) -> Path | None:
     index = dir_path / index_file
-    if index.is_file():
-        return index
+    try:
+        if index.is_file():
+            return index
+    except (OSError, ValueError):
+        return None
     return None
 
 
