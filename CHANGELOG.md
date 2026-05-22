@@ -10,10 +10,17 @@
 - **Production docs** — README sections for reverse-proxy layout, uvicorn worker tuning, Kubernetes probes, Docker recipe, and a performance tuning table (`max_cache_size`, `sync_threshold`, `chunk_size`, `autocompress*`).
 - **Supply chain** — `cargo` ecosystem added to `dependabot.yml`; CI runs `pip-audit` + `cargo-audit`; `publish.yml` smoke-tests the built wheel on 3 OS × 2 Python before publishing, and emits sigstore attestations.
 - **Project hygiene** — `SECURITY.md` (disclosure policy + CVSS timelines), `STABILITY.md` (SemVer + deprecation), `CONTRIBUTING.md`, GitHub issue templates (bug + feature), PR template.
+- **Standalone Docker image** — published to `ghcr.io/rrobles-qdq/whitesnout` for `linux/amd64` and `linux/arm64` on every tag. Multi-platform build via buildx with provenance, SBOM, and registry-pushed attestations.
+- **Automated release notes** — `release-drafter` workflow drafts the next GitHub release as PRs land on `main`, classified by label.
+
+### Documented
+
+- **WebSocket pass-through** — README clarifies that WebSocket scopes are forwarded transparently to the inner ASGI app; WhiteSnout itself only intercepts HTTP.
+- **Async runtime stance** — `STABILITY.md` documents asyncio-only support; trio/curio users should swap server.
 
 ### Internal
 
-- 11 new tests in `tests/test_lifespan_health_prometheus.py` covering lifespan startup/shutdown, health check status/headers/hook firing, and Prometheus counter/histogram outputs.
+- 12 new tests in `tests/test_lifespan_health_prometheus.py` covering lifespan startup/shutdown, WebSocket pass-through, health check status/headers/hook firing, and Prometheus counter/histogram outputs.
 
 ## 2.0.0 (2026-05-21) — Performance, hardening, ecosystem
 
