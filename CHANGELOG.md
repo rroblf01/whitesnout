@@ -10,7 +10,6 @@
 - **Production docs** — README sections for reverse-proxy layout, uvicorn worker tuning, Kubernetes probes, Docker recipe, and a performance tuning table (`max_cache_size`, `sync_threshold`, `chunk_size`, `autocompress*`).
 - **Supply chain** — `cargo` ecosystem added to `dependabot.yml`; CI runs `pip-audit` + `cargo-audit`; `publish.yml` smoke-tests the built wheel on 3 OS × 2 Python before publishing, and emits sigstore attestations.
 - **Project hygiene** — `SECURITY.md` (disclosure policy + CVSS timelines), `STABILITY.md` (SemVer + deprecation), `CONTRIBUTING.md`, GitHub issue templates (bug + feature), PR template.
-- **Standalone Docker image** — published to `ghcr.io/rrobles-qdq/whitesnout` for `linux/amd64` and `linux/arm64` on every tag. Multi-platform build via buildx with provenance, SBOM, and registry-pushed attestations.
 - **Automated release notes** — `release-drafter` workflow drafts the next GitHub release as PRs land on `main`, classified by label.
 
 ### Documented

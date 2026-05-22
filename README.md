@@ -576,16 +576,6 @@ The endpoint is `Cache-Control: no-store` and bypasses the file pipeline, so pro
 
 ### Docker
 
-**Standalone server image** (mount your assets at `/srv`):
-
-```console
-$ docker run --rm -p 8000:8000 -v ./public:/srv ghcr.io/rrobles-qdq/whitesnout:latest
-```
-
-The image runs uvicorn against a bare `WhiteSnout()` reading config from `WHITESNOUT_*` env vars. Pin to a major version (`:2`) or exact release (`:2.0.0`) in production. Multi-arch: `linux/amd64`, `linux/arm64`.
-
-**Custom image** (framework integration — FastAPI, Django, Starlette):
-
 ```dockerfile
 FROM python:3.13-slim
 WORKDIR /app
