@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.1.0 (2026-05-22) — Observability, ergonomics, production polish
 
 ### Added
 
