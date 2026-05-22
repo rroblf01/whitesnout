@@ -1,9 +1,8 @@
 # whitesnout
 
-[![tests](https://github.com/rrobles-qdq/whitesnout/actions/workflows/test.yml/badge.svg)](https://github.com/rrobles-qdq/whitesnout/actions/workflows/test.yml)
+[![tests](https://github.com/rroblf01/whitesnout/actions/workflows/test.yml/badge.svg)](https://github.com/rroblf01/whitesnout/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/whitesnout.svg)](https://pypi.org/project/whitesnout/)
 [![Python versions](https://img.shields.io/pypi/pyversions/whitesnout.svg)](https://pypi.org/project/whitesnout/)
-[![codecov](https://codecov.io/gh/rrobles-qdq/whitesnout/branch/main/graph/badge.svg)](https://codecov.io/gh/rrobles-qdq/whitesnout)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **WhiteSnout** is an ASGI static file server for Python — like Whitenoise, but built for ASGI frameworks (FastAPI, Starlette, Django, etc.). It serves static files with minimal memory overhead, streaming content in chunks and leveraging pre-compressed assets. A Rust extension (PyO3) accelerates the hot path transparently.
