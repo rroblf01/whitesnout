@@ -40,6 +40,14 @@ def read_root():
 app = WhiteSnout(api, directory="static")
 ```
 
+Launch with uvicorn targeting the **WhiteSnout-wrapped** object:
+
+```console
+$ uvicorn main:app --reload --port 8000
+```
+
+> **Gotcha — do not use `fastapi dev` / `fastapi run`.** The FastAPI CLI auto-discovers the first `FastAPI` instance in the module and binds uvicorn to *it*, bypassing the WhiteSnout wrapper entirely. Static requests then hit FastAPI directly and return `{"detail":"Not Found"}`. Always launch via `uvicorn main:app` (or your ASGI server of choice) so the WhiteSnout instance handles the request. Same applies if you point at the inner FastAPI by name: `uvicorn main:api` skips WhiteSnout.
+
 ### With Django
 
 ```python

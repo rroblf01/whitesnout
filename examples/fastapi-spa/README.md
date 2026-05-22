@@ -22,6 +22,8 @@ $ uv add whitesnout fastapi 'uvicorn[standard]'
 $ uv run uvicorn main:app --port 8000
 ```
 
+> Use `uvicorn main:app` — not `fastapi dev`. The FastAPI CLI binds to the inner `FastAPI()` instance and bypasses WhiteSnout, so static files return `{"detail":"Not Found"}`.
+
 Visit:
 
 - `http://localhost:8000/` — SPA entry
