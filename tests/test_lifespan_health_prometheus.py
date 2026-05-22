@@ -44,6 +44,30 @@ async def test_lifespan_shutdown_only(tmp_path: Path) -> None:
     assert sent == [{"type": "lifespan.shutdown.complete"}]
 
 
+async def test_websocket_passes_through_to_inner_app(tmp_path: Path) -> None:
+    received: list[dict] = []
+
+    async def inner(scope, receive, send):
+        received.append(scope)
+        await send({"type": "websocket.accept"})
+        await send({"type": "websocket.close", "code": 1000})
+
+    app = WhiteSnout(inner, directory=str(tmp_path))
+    scope = {"type": "websocket", "path": "/ws", "headers": []}
+    sent: list[dict] = []
+
+    async def receive() -> dict:
+        return {"type": "websocket.connect"}
+
+    async def send(event: dict) -> None:
+        sent.append(event)
+
+    await app(scope, receive, send)
+    assert len(received) == 1
+    assert received[0]["type"] == "websocket"
+    assert sent[0]["type"] == "websocket.accept"
+
+
 async def test_lifespan_inner_app_still_gets_event(tmp_path: Path) -> None:
     received: list[dict] = []
 

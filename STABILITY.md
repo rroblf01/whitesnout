@@ -86,6 +86,21 @@ minor bump and does not require deprecation.
 - The Rust extension does not expose a C ABI of its own — downstream Rust
   code should not depend on `whitesnout._rs` symbols.
 
+## Async runtime support
+
+WhiteSnout targets **asyncio** (the standard library). It uses
+`asyncio.to_thread` for blocking file reads, which is asyncio-specific. Trio
+or curio users should run WhiteSnout under an asyncio-compatible server:
+
+- `uvicorn` — asyncio only, the default and tested combination.
+- `hypercorn --worker-class asyncio` — asyncio worker on hypercorn.
+- `hypercorn --worker-class trio` — **not supported**, will fail when
+  WhiteSnout calls `asyncio.to_thread`.
+
+Adding a true cross-runtime layer (e.g. via `anyio`) would add a required
+runtime dependency and is not on the roadmap. If you need WhiteSnout under
+trio, open an issue with the use case.
+
 ## Out of scope for any version
 
 These will **not** be added regardless of version:
@@ -94,6 +109,7 @@ These will **not** be added regardless of version:
 - HTTP/2 server push, HTTPS termination, request body upload handling.
 - Authentication, authorization, rate limiting beyond what a reverse proxy
   already provides.
+- Trio / curio support without an asyncio compatibility shim.
 
 If you need one of those, WhiteSnout sits behind nginx, Caddy, Traefik, or a
 CDN that already does it.

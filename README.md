@@ -531,6 +531,28 @@ WhiteSnout handles ASGI **lifespan** events natively. When the host server start
 
 Pair with `uvicorn --timeout-graceful-shutdown 30` (default 30s) so in-flight requests finish before the worker exits.
 
+### WebSockets
+
+WhiteSnout does not serve WebSockets itself, but it transparently passes WebSocket scopes through to the inner ASGI app:
+
+```python
+from fastapi import FastAPI, WebSocket
+from whitesnout import WhiteSnout
+
+api = FastAPI()
+
+@api.websocket("/ws")
+async def ws(websocket: WebSocket):
+    await websocket.accept()
+    await websocket.send_text("hi")
+
+app = WhiteSnout(api, directory="static")
+# /ws  -> handled by FastAPI
+# /any.css -> handled by WhiteSnout
+```
+
+The HTTP path is the only one WhiteSnout intercepts. WebSocket, lifespan, and any other scope type goes straight to the inner app with no overhead.
+
 ### Kubernetes
 
 Suggested probe config (assuming `health_check_path="/healthz"`):
@@ -554,7 +576,15 @@ The endpoint is `Cache-Control: no-store` and bypasses the file pipeline, so pro
 
 ### Docker
 
-WhiteSnout ships pre-compressed wheels for `manylinux_2_28_x86_64`, `aarch64`, macOS x86/arm, and Windows. A minimal `Dockerfile`:
+**Standalone server image** (mount your assets at `/srv`):
+
+```console
+$ docker run --rm -p 8000:8000 -v ./public:/srv ghcr.io/rrobles-qdq/whitesnout:latest
+```
+
+The image runs uvicorn against a bare `WhiteSnout()` reading config from `WHITESNOUT_*` env vars. Pin to a major version (`:2`) or exact release (`:2.0.0`) in production. Multi-arch: `linux/amd64`, `linux/arm64`.
+
+**Custom image** (framework integration — FastAPI, Django, Starlette):
 
 ```dockerfile
 FROM python:3.13-slim
@@ -564,7 +594,7 @@ COPY . .
 CMD ["uvicorn", "myapp:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
 ```
 
-No Rust toolchain inside the image — wheels install in milliseconds.
+WhiteSnout ships pre-compressed wheels for `manylinux_2_28_x86_64`, `aarch64`, macOS x86/arm, and Windows — no Rust toolchain needed inside the image. Wheels install in milliseconds.
 
 ---
 
